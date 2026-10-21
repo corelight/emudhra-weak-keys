@@ -68,10 +68,10 @@ The CCADB IDs refer to the intermediates issued by the emSign roots.
 The keys live in the `EMudhraWeakKeys::compromised_keys` option, indexed
 by the lowercase hex SPKI SHA-256 hash. The 16 known certificates for
 these keys (8 issued by the emSign roots, 8 cross-signed by Sectigo) are
-listed in `EMudhraWeakKeys::known_certs`, indexed by the lowercase hex
-SHA-256 hash of the DER-encoded certificate; this table is only used to
-describe the certificate in the notice. Both options can be extended via
-`redef` or the config framework.
+listed in `EMudhraWeakKeys::known_certs`, as the lowercase hex SHA-256
+hash of the DER-encoded certificate; this set is only used to describe
+the certificate in the notice. Both options can be extended via `redef`
+or the config framework.
 
 The certificate data was taken from `impacted-intermediates.json`
 published at https://emudhra.we-have-a-problem.com/. All hashes and
@@ -110,11 +110,15 @@ and certificate. The accepted notices (see below) are suppressed per
 client address, server address and certificate, so that every client
 that accepts a chain is reported.
 
-Since the certificate is checked as soon as it is parsed, detection
-does not depend on the TLS handshake completing; clients that already
-distrust these intermediates will typically abort the connection.
+SSL/TLS certificate chains are checked once they are complete: when the
+connection is established, or - if it is not - when it ends. Detection
+therefore does not depend on the TLS handshake completing; clients that
+already distrust these intermediates will typically abort the
+connection. For such connections, the notice is only raised at the end
+of the connection. Certificates seen in other protocols are checked as
+soon as they are parsed.
 
-If the SSL/TLS connection is subsequently established, a second notice
+If the SSL/TLS connection is established, a second notice
 of type `EMudhraWeakKeys::Compromised_Intermediate_Cert_Accepted` is
 raised, with the same details. Zeek considers a connection established
 once both sides have switched to encrypted communication - in TLS 1.2,
