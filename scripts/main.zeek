@@ -10,6 +10,14 @@
 ##! (both server and client chains), the notice contains information about the
 ##! chain, and a second notice is raised if the SSL/TLS connection is
 ##! established - i.e. the peer did not reject the chain.
+##!
+##! Additionally, SSL/TLS certificate chains that do not contain any of the
+##! compromised keys are checked for certificates whose issuer is one of the
+##! compromised intermediates. This detects chains from which the server (or
+##! client) omitted the compromised intermediate, e.g. relying on the peer to
+##! complete the chain via AIA fetching or intermediate caching. Since the
+##! issuer name has to match for clients to build the chain, this also works for
+##! rogue certificates created with the leaked keys.
 
 @load base/protocols/ssl
 @load base/files/x509
@@ -27,6 +35,15 @@ export {
 		## public key of one of the compromised eMudhra intermediate CAs. This
 		## means that the peer accepted the chain, or did not validate it.
 		Compromised_Intermediate_Cert_Accepted,
+		## Indicates that an SSL/TLS certificate chain contained a certificate
+		## issued by one of the compromised eMudhra intermediate CAs (based on
+		## the issuer name), while the chain did not contain a certificate with
+		## the public key of any of the compromised intermediates.
+		Compromised_Intermediate_Issuer,
+		## Indicates that an SSL/TLS connection was established with a chain
+		## for which :zeek:see:`EmudraWeakKeys::Compromised_Intermediate_Issuer`
+		## was raised.
+		Compromised_Intermediate_Issuer_Accepted,
 	};
 
 	## Information about a compromised key.
@@ -49,6 +66,26 @@ export {
 		["ec4ffa1ad0ac88081314b7aaffef6a91f97cd57291bb5ba686c5415f5eb4f6b6"] = KeyInfo($name="EM OV CS CA - G3B (eMudhra BV)", $ccadb="A012306"),
 		["92c063d67e8f14db71d288e11266ffdaf69cbf115f7bab14f3bc2f68d25e0e30"] = KeyInfo($name="EM OV CS CA - G3C (eMudhra Inc)", $ccadb="A012298"),
 	};
+
+	## Subject names of the compromised intermediate CAs, mapped to the
+	## SPKI hash of their key in :zeek:see:`EmudraWeakKeys::compromised_keys`.
+	## Names are normalized using :zeek:see:`EmudraWeakKeys::normalize_name`.
+	option compromised_subjects: table[string] of string = {
+		["cn=em dv tls ca - g3b,o=emudhra bv,c=nl"] = "ebed6475c2c2d80fcb199f3fe8dd6e6b3ce60b77eb15d4e42c3dec0c6f5b5105",
+		["cn=em ov tls ca - g3b,o=emudhra bv,c=nl"] = "43bffa19d6ef651451f6841e019931e96f6f2eaeff28ab4b6f1ce4576de2717b",
+		["cn=em ev tls ca - g3b,o=emudhra bv,c=nl"] = "e0254c7fcdc265e2f0f8a428dabb75ab4ae039b4872d62f5ee57f0877d5a8a41",
+		["cn=em dv tls ca - g3c,o=emudhra inc,c=us"] = "49dd353dc2b919a3770645117d0e60c16115e7d1bc259eefe734b00ea434fe5f",
+		["cn=em ov tls ca - g3c,o=emudhra inc,c=us"] = "63ecefee431d49523bc1136c4e72d0206a477086caf606cd5cf025686c109cf8",
+		["cn=em ev tls ca - g3c,o=emudhra inc,c=us"] = "5c0660a2b164910d8ff589c18e14552e9e0ec237dcefe2cb736d41a4811f81a0",
+		["cn=em ov cs ca - g3b,o=emudhra bv,c=nl"] = "ec4ffa1ad0ac88081314b7aaffef6a91f97cd57291bb5ba686c5415f5eb4f6b6",
+		["cn=em ov cs ca - g3c,o=emudhra inc,c=us"] = "92c063d67e8f14db71d288e11266ffdaf69cbf115f7bab14f3bc2f68d25e0e30",
+	};
+
+	## Normalizes a distinguished name, as rendered by Zeek, for comparison:
+	## lowercases it and removes insignificant whitespace. Clients compare
+	## names case-insensitively and ignoring such whitespace, so a rogue
+	## certificate could vary them.
+	global normalize_name: function(name: string): string;
 
 	## Information about a known certificate for one of the compromised keys.
 	type CertInfo: record {
@@ -100,7 +137,80 @@ redef record SSL::Info += {
 	## Compromised certificates seen in the certificate chains of this
 	## connection.
 	emudhra_matches: vector of ChainMatch &optional;
+	## Whether the certificate chains were checked for certificates issued
+	## by compromised intermediates.
+	emudhra_issuers_checked: bool &default=F;
 };
+
+function normalize_name(name: string): string
+	{
+	local s = to_lower(name);
+	# Escaped spaces (RFC 2253 escapes leading and trailing spaces).
+	s = gsub(s, /\\ /, " ");
+	s = gsub(s, /[ \t\r\n]+/, " ");
+	s = gsub(s, / ?, ?/, ",");
+	s = gsub(s, / ?= ?/, "=");
+	return strip(s);
+	}
+
+# Checks a certificate chain for certificates issued by one of the compromised
+# intermediates, if the chain does not contain any of the compromised keys.
+function check_chain_issuers(c: connection, chain: vector of Files::Info, side: string, established: bool)
+	{
+	if ( c$ssl?$emudhra_matches )
+		for ( i in c$ssl$emudhra_matches )
+			if ( c$ssl$emudhra_matches[i]$side == side )
+				return;
+
+	for ( i in chain )
+		{
+		if ( ! chain[i]?$x509 )
+			next;
+
+		local info = chain[i]$x509;
+		local issuer = normalize_name(info$certificate$issuer);
+		if ( issuer !in compromised_subjects || compromised_subjects[issuer] !in compromised_keys )
+			next;
+
+		local ki = compromised_keys[compromised_subjects[issuer]];
+		local hash = sha256_hash(x509_get_certificate_string(info$handle));
+
+		local leaf = ( chain[0]?$x509 ) ? chain[0]$x509$certificate$subject : "<unknown>";
+		local sni = c$ssl?$server_name ? fmt(", SNI %s", c$ssl$server_name) : "";
+		local desc = fmt("%s certificate chain contains %s at position %d, issued by compromised eMudhra intermediate %s (CCADB %s), but not the intermediate itself",
+		                 side, info$certificate$subject, i, ki$name, ki$ccadb);
+		local notice_sub = fmt("leaf: %s%s; sha256: %s", leaf, sni, hash);
+		local identifier = cat(c$id$resp_h, c$id$resp_p, hash);
+
+		NOTICE(Notice::Info($note=Compromised_Intermediate_Issuer,
+		                    $conn=c, $fuid=chain[i]$fuid,
+		                    $msg=desc, $sub=notice_sub,
+		                    $identifier=identifier,
+		                    $suppress_for=1day));
+
+		if ( established )
+			NOTICE(Notice::Info($note=Compromised_Intermediate_Issuer_Accepted,
+			                    $conn=c, $fuid=chain[i]$fuid,
+			                    $msg=fmt("SSL/TLS connection established; %s", desc),
+			                    $sub=notice_sub,
+			                    $identifier=identifier,
+			                    $suppress_for=1day));
+		}
+	}
+
+function check_issuers(c: connection, established: bool)
+	{
+	if ( c$ssl$emudhra_issuers_checked )
+		return;
+
+	c$ssl$emudhra_issuers_checked = T;
+
+	if ( c$ssl?$cert_chain )
+		check_chain_issuers(c, c$ssl$cert_chain, "Server", established);
+
+	if ( c$ssl?$client_cert_chain )
+		check_chain_issuers(c, c$ssl$client_cert_chain, "Client", established);
+	}
 
 # Priority is lower than the SSL file_sniff handler, which adds the
 # certificate to the chain.
@@ -163,6 +273,21 @@ event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certifi
 		}
 
 	NOTICE(n);
+	}
+
+# Certificate chains are complete once the connection is established. Priority
+# is higher than the SSL handler that calls SSL::ssl_finishing, so that
+# established connections are checked here.
+event ssl_established(c: connection) &priority=25
+	{
+	check_issuers(c, T);
+	}
+
+# For connections that are not established, this is called when the connection
+# ends.
+hook SSL::ssl_finishing(c: connection)
+	{
+	check_issuers(c, F);
 	}
 
 event ssl_established(c: connection)

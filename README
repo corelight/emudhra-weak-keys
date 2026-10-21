@@ -118,6 +118,37 @@ notice therefore indicates that the peer accepted the chain - or did not
 validate it at all, which is common for e.g. `curl -k`, malware or IoT
 devices. It does not indicate that application data was exchanged.
 
+Chains without the compromised intermediate
+-------------------------------------------
+
+A server (or client) can omit the compromised intermediate from the
+chain it sends, relying on the peer to complete the chain - e.g. via
+AIA fetching or intermediate caches. Someone using a leaked key to
+create rogue certificates might do this to avoid detection by key.
+
+Therefore, SSL/TLS certificate chains that do not contain any of the
+compromised keys are also checked for certificates whose issuer name
+matches one of the compromised intermediates. All certificates in the
+chain are checked, not only the leaf - this also covers e.g. a rogue
+sub-CA created with a leaked key. Clients have to match the issuer name
+to build the chain, so it cannot be changed by a rogue certificate that
+should validate. Names are compared case-insensitively and ignoring
+insignificant whitespace.
+
+If a match is found, a notice of type
+`EmudraWeakKeys::Compromised_Intermediate_Issuer` is raised; if the
+connection is established, an additional
+`EmudraWeakKeys::Compromised_Intermediate_Issuer_Accepted` notice is
+raised. The `sub` field contains the leaf certificate subject, the SNI
+(if present) and the SHA-256 hash of the matching certificate.
+
+These checks happen once the chain is complete: when the connection is
+established, or when it ends otherwise. For aborted connections the
+notice is therefore only raised at the end of the connection.
+
+The subject names live in the `EmudraWeakKeys::compromised_subjects`
+option, normalized using `EmudraWeakKeys::normalize_name`.
+
 Limitations
 -----------
 
@@ -128,8 +159,12 @@ Limitations
 - In TLS 1.3 the certificate chain is encrypted and cannot be seen by
   Zeek, so detection only works for TLS 1.2 and earlier (unless
   decryption is used).
-- Only certificates containing one of the compromised keys are
-  detected. Leaf certificates issued by one of the compromised
-  intermediates are not detected if the server omits the intermediate
-  from the chain it sends.
+- Certificates issued by one of the compromised intermediates are only
+  detected if they are sent in an SSL/TLS chain (which the leaf always
+  is); the issuer name check does not apply to certificates seen in
+  other protocols. Name normalization covers case and whitespace, not
+  full RFC 4518 string preparation.
+- If another CA uses the same subject name as one of the compromised
+  intermediates, certificates issued by it trigger the issuer name
+  notice.
 - The two code-signing CAs will usually not appear in TLS traffic.
