@@ -124,6 +124,24 @@ notice therefore indicates that the peer accepted the chain - or did not
 validate it at all, which is common for e.g. `curl -k`, malware or IoT
 devices. It does not indicate that application data was exchanged.
 
+Client certificates
+-------------------
+
+Client certificate chains are checked in the same way as server
+certificate chains. The six TLS intermediates assert both TLS server
+and TLS client authentication in their extended key usage, so client
+certificates issued by them - or created using the leaked keys - are
+valid for TLS client authentication. Which client certificates a server
+accepts depends on the trust store it uses for client authentication.
+
+In practice, client certificates issued by public CAs are rare, and
+they are being phased out: the Chrome Root Program requires subscriber
+certificates issued from March 15, 2027 on to only assert TLS server
+authentication. Also note that servers that request client
+certificates optionally may complete the handshake without validating
+the client certificate, so for client chains the accepted notices are a
+weaker indication that the chain was accepted.
+
 Chains without the compromised intermediate
 -------------------------------------------
 
@@ -135,10 +153,13 @@ create rogue certificates might do this to avoid detection by key.
 Therefore, SSL/TLS certificate chains that do not contain any of the
 compromised keys are also checked for certificates whose issuer name
 matches one of the compromised intermediates. All certificates in the
-chain are checked, not only the leaf - this also covers e.g. a rogue
-sub-CA created with a leaked key. Clients have to match the issuer name
-to build the chain, so it cannot be changed by a rogue certificate that
-should validate. Names are compared case-insensitively and ignoring
+chain are checked, not only the leaf, since apart from the leaf coming
+first, the order of the certificates is not guaranteed. This would also
+detect a rogue sub-CA created with a leaked key - however, the
+compromised intermediates have a path length constraint of 0, so
+compliant clients reject such sub-CAs. Clients have to match the issuer
+name to build the chain, so it cannot be changed by a rogue certificate
+that should validate. Names are compared case-insensitively and ignoring
 insignificant whitespace.
 
 If a match is found, a notice of type
