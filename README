@@ -147,7 +147,11 @@ established, or when it ends otherwise. For aborted connections the
 notice is therefore only raised at the end of the connection.
 
 The subject names live in the `EmudraWeakKeys::compromised_subjects`
-option, normalized using `EmudraWeakKeys::normalize_name`.
+option, normalized using `EmudraWeakKeys::normalize_name` (lowercased,
+with all whitespace removed). To keep this cheap, only issuer names
+matching the `EmudraWeakKeys::issuer_prefilter` pattern (by default
+`/emudhra/i`) are normalized and looked up; when adding subjects that do
+not contain "emudhra", adjust the pattern as well.
 
 Limitations
 -----------

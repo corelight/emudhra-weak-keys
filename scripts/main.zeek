@@ -71,21 +71,28 @@ export {
 	## SPKI hash of their key in :zeek:see:`EmudraWeakKeys::compromised_keys`.
 	## Names are normalized using :zeek:see:`EmudraWeakKeys::normalize_name`.
 	option compromised_subjects: table[string] of string = {
-		["cn=em dv tls ca - g3b,o=emudhra bv,c=nl"] = "ebed6475c2c2d80fcb199f3fe8dd6e6b3ce60b77eb15d4e42c3dec0c6f5b5105",
-		["cn=em ov tls ca - g3b,o=emudhra bv,c=nl"] = "43bffa19d6ef651451f6841e019931e96f6f2eaeff28ab4b6f1ce4576de2717b",
-		["cn=em ev tls ca - g3b,o=emudhra bv,c=nl"] = "e0254c7fcdc265e2f0f8a428dabb75ab4ae039b4872d62f5ee57f0877d5a8a41",
-		["cn=em dv tls ca - g3c,o=emudhra inc,c=us"] = "49dd353dc2b919a3770645117d0e60c16115e7d1bc259eefe734b00ea434fe5f",
-		["cn=em ov tls ca - g3c,o=emudhra inc,c=us"] = "63ecefee431d49523bc1136c4e72d0206a477086caf606cd5cf025686c109cf8",
-		["cn=em ev tls ca - g3c,o=emudhra inc,c=us"] = "5c0660a2b164910d8ff589c18e14552e9e0ec237dcefe2cb736d41a4811f81a0",
-		["cn=em ov cs ca - g3b,o=emudhra bv,c=nl"] = "ec4ffa1ad0ac88081314b7aaffef6a91f97cd57291bb5ba686c5415f5eb4f6b6",
-		["cn=em ov cs ca - g3c,o=emudhra inc,c=us"] = "92c063d67e8f14db71d288e11266ffdaf69cbf115f7bab14f3bc2f68d25e0e30",
+		["cn=emdvtlsca-g3b,o=emudhrabv,c=nl"] = "ebed6475c2c2d80fcb199f3fe8dd6e6b3ce60b77eb15d4e42c3dec0c6f5b5105",
+		["cn=emovtlsca-g3b,o=emudhrabv,c=nl"] = "43bffa19d6ef651451f6841e019931e96f6f2eaeff28ab4b6f1ce4576de2717b",
+		["cn=emevtlsca-g3b,o=emudhrabv,c=nl"] = "e0254c7fcdc265e2f0f8a428dabb75ab4ae039b4872d62f5ee57f0877d5a8a41",
+		["cn=emdvtlsca-g3c,o=emudhrainc,c=us"] = "49dd353dc2b919a3770645117d0e60c16115e7d1bc259eefe734b00ea434fe5f",
+		["cn=emovtlsca-g3c,o=emudhrainc,c=us"] = "63ecefee431d49523bc1136c4e72d0206a477086caf606cd5cf025686c109cf8",
+		["cn=emevtlsca-g3c,o=emudhrainc,c=us"] = "5c0660a2b164910d8ff589c18e14552e9e0ec237dcefe2cb736d41a4811f81a0",
+		["cn=emovcsca-g3b,o=emudhrabv,c=nl"] = "ec4ffa1ad0ac88081314b7aaffef6a91f97cd57291bb5ba686c5415f5eb4f6b6",
+		["cn=emovcsca-g3c,o=emudhrainc,c=us"] = "92c063d67e8f14db71d288e11266ffdaf69cbf115f7bab14f3bc2f68d25e0e30",
 	};
 
 	## Normalizes a distinguished name, as rendered by Zeek, for comparison:
-	## lowercases it and removes insignificant whitespace. Clients compare
-	## names case-insensitively and ignoring such whitespace, so a rogue
-	## certificate could vary them.
+	## lowercases it and removes all whitespace and backslashes. Clients
+	## compare names case-insensitively and ignoring insignificant
+	## whitespace, so a rogue certificate could vary them. This normalizes
+	## more than clients do, which is fine for detection.
 	global normalize_name: function(name: string): string;
+
+	## Issuer names have to match this pattern to be checked against
+	## :zeek:see:`EmudraWeakKeys::compromised_subjects`. This avoids
+	## normalizing the issuer name of every certificate. If you add subjects
+	## that do not match, adjust this pattern.
+	option issuer_prefilter = /emudhra/i;
 
 	## Information about a known certificate for one of the compromised keys.
 	type CertInfo: record {
@@ -144,13 +151,8 @@ redef record SSL::Info += {
 
 function normalize_name(name: string): string
 	{
-	local s = to_lower(name);
-	# Escaped spaces (RFC 2253 escapes leading and trailing spaces).
-	s = gsub(s, /\\ /, " ");
-	s = gsub(s, /[ \t\r\n]+/, " ");
-	s = gsub(s, / ?, ?/, ",");
-	s = gsub(s, / ?= ?/, "=");
-	return strip(s);
+	# Backslashes, as RFC 2253 escapes leading and trailing spaces.
+	return gsub(to_lower(name), /[ \t\r\n\\]+/, "");
 	}
 
 # Checks a certificate chain for certificates issued by one of the compromised
@@ -168,6 +170,9 @@ function check_chain_issuers(c: connection, chain: vector of Files::Info, side: 
 			next;
 
 		local info = chain[i]$x509;
+		if ( issuer_prefilter !in info$certificate$issuer )
+			next;
+
 		local issuer = normalize_name(info$certificate$issuer);
 		if ( issuer !in compromised_subjects || compromised_subjects[issuer] !in compromised_keys )
 			next;
