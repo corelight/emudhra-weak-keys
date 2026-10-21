@@ -1,0 +1,20 @@
+[package]
+script_dir = scripts
+test_command = cd testing && btest -c btest.cfg
+summary = Detect eMudhra intermediate CAs with compromised private keys, e.g. in TLS certificate chains.
+description = Raises a notice when encountering one of
+	the eMudhra intermediate CA certificates whose private keys were found to be
+	compromised due to flawed key generation (Mozilla Bugzilla 2083449),
+	e.g. as part of an SSL/TLS certificate chain.
+tags = ssl, tls, x509, certificate, emudhra, notice
+depends = 
+	zeek >=4.0.0
+
+[template]
+source = https://github.com/zeek/package-template
+version = v3.1.8
+zkg_version = 3.2.0
+
+[template_vars]
+name = emudra-weak-keys
+
