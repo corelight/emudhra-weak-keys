@@ -1,12 +1,14 @@
-##! Raise a notice when one of the eMudhra intermediate CA certificates whose
-##! private keys were found to be compromised due to flawed key generation
-##! (Mozilla Bugzilla 2083449) is encountered.
+##! Raise a notice when a certificate is encountered that contains the public
+##! key of one of the eMudhra intermediate CAs whose private keys were found to
+##! be compromised due to flawed key generation (Mozilla Bugzilla 2083449).
 ##!
-##! Certificates are matched by the SHA-256 hash of their DER encoding, as
-##! re-encoded by OpenSSL; trailing data after the certificate does not
-##! influence the hash. Every certificate parsed by the X509 analyzer is
-##! checked. For certificates seen in SSL/TLS (both server and client chains),
-##! the notice contains information about the chain.
+##! Certificates are matched by the SHA-256 hash of their Subject Public Key
+##! Info (SPKI). This detects all certificates for the compromised keys - the
+##! intermediates issued by the emSign roots, their cross-signatures by Sectigo,
+##! as well as any other certificate created for these keys. Every certificate
+##! parsed by the X509 analyzer is checked. For certificates seen in SSL/TLS
+##! (both server and client chains), the notice contains information about the
+##! chain.
 
 @load base/protocols/ssl
 @load base/files/x509
@@ -16,57 +18,85 @@ module EmudraWeakKeys;
 
 export {
 	redef enum Notice::Type += {
-		## Indicates that one of the eMudhra intermediate CA certificates with
-		## a compromised private key was encountered.
+		## Indicates that a certificate containing the public key of one of
+		## the compromised eMudhra intermediate CAs was encountered.
 		Compromised_Intermediate_Cert,
 	};
 
-	## Information about a compromised certificate.
-	type CertInfo: record {
-		## Subject common name and organization of the certificate.
+	## Information about a compromised key.
+	type KeyInfo: record {
+		## Subject common name and organization of the intermediate CA.
 		name: string;
-		## CCADB record ID of the certificate.
+		## CCADB record ID of the intermediate issued by the emSign root.
 		ccadb: string;
-		## Serial number of the certificate (lowercase hex).
-		serial: string;
-		## Common name of the certificate issuer.
-		issuer: string;
 	};
 
-	## Compromised certificates, indexed by the lowercase hex SHA-256 hash of
-	## their DER encoding.
-	option compromised_certs: table[string] of CertInfo = {
-		["e7568fe6e12331f4fd7de61da4c7559d0f8eb192a218d4741a3ba75184333838"] = CertInfo($name="EM EV TLS CA - G3B (eMudhra BV)", $ccadb="A012304", $serial="c7c41efe92d825f05eae841a4a82c1", $issuer="emSign Root TLS CA - G3"),
-		["98b896625c0c230adeec3eb2cf6aad5001ecf9156a68644e82374ce5833bc25b"] = CertInfo($name="EM OV TLS CA - G3B (eMudhra BV)", $ccadb="A012308", $serial="6cada367fb1c100088120ea202d568", $issuer="emSign Root TLS CA - G3"),
-		["42c4accd12c4f59597925e1a08a7a90102608543809308d50ec427e118ba1493"] = CertInfo($name="EM DV TLS CA - G3B (eMudhra BV)", $ccadb="A012302", $serial="a4aee678f23362b4c0e460b772f214", $issuer="emSign Root TLS CA - G3"),
-		["432ec25f0d28de9006d97bf752f17bbb2cd41f669933fcb072d9a1148d0261f3"] = CertInfo($name="EM EV TLS CA - G3C (eMudhra Inc)", $ccadb="A012296", $serial="8009928a64107601af05fa2f19f109", $issuer="emSign Root TLS CA - G3"),
-		["cb6e15165ac802e9b3f993f16c25d41f4e81c21ebde71ae1b012ac00bf9c7c3f"] = CertInfo($name="EM OV TLS CA - G3C (eMudhra Inc)", $ccadb="A012300", $serial="296926c227a3a1526392b19482a504", $issuer="emSign Root TLS CA - G3"),
-		["0164d7ceae5bb909c272af151ff44b1177ae9b47d9424b94f1d9558c30934d19"] = CertInfo($name="EM DV TLS CA - G3C (eMudhra Inc)", $ccadb="A012294", $serial="588b2e3c2bb8cda13e1a1209254321", $issuer="emSign Root TLS CA - G3"),
-		["9e39de2881273acc225a149c72ba3e0f51424963669ab633ee1dc7df5db067b4"] = CertInfo($name="EM OV CS CA - G3B (eMudhra BV)", $ccadb="A012306", $serial="7818933f8f85b4619a2b35fba83d0a", $issuer="emSign Root CS CA - G3"),
-		["4b2460a466f95fd40113bcdcca2ceb29b3b093921de45474da7df48874c630b1"] = CertInfo($name="EM OV CS CA - G3C (eMudhra Inc)", $ccadb="A012298", $serial="544b7f922c31ae220a4a922916f6e6", $issuer="emSign Root CS CA - G3"),
+	## Compromised keys, indexed by the lowercase hex SHA-256 hash of their
+	## DER-encoded Subject Public Key Info.
+	option compromised_keys: table[string] of KeyInfo = {
+		["ebed6475c2c2d80fcb199f3fe8dd6e6b3ce60b77eb15d4e42c3dec0c6f5b5105"] = KeyInfo($name="EM DV TLS CA - G3B (eMudhra BV)", $ccadb="A012302"),
+		["43bffa19d6ef651451f6841e019931e96f6f2eaeff28ab4b6f1ce4576de2717b"] = KeyInfo($name="EM OV TLS CA - G3B (eMudhra BV)", $ccadb="A012308"),
+		["e0254c7fcdc265e2f0f8a428dabb75ab4ae039b4872d62f5ee57f0877d5a8a41"] = KeyInfo($name="EM EV TLS CA - G3B (eMudhra BV)", $ccadb="A012304"),
+		["49dd353dc2b919a3770645117d0e60c16115e7d1bc259eefe734b00ea434fe5f"] = KeyInfo($name="EM DV TLS CA - G3C (eMudhra Inc)", $ccadb="A012294"),
+		["63ecefee431d49523bc1136c4e72d0206a477086caf606cd5cf025686c109cf8"] = KeyInfo($name="EM OV TLS CA - G3C (eMudhra Inc)", $ccadb="A012300"),
+		["5c0660a2b164910d8ff589c18e14552e9e0ec237dcefe2cb736d41a4811f81a0"] = KeyInfo($name="EM EV TLS CA - G3C (eMudhra Inc)", $ccadb="A012296"),
+		["ec4ffa1ad0ac88081314b7aaffef6a91f97cd57291bb5ba686c5415f5eb4f6b6"] = KeyInfo($name="EM OV CS CA - G3B (eMudhra BV)", $ccadb="A012306"),
+		["92c063d67e8f14db71d288e11266ffdaf69cbf115f7bab14f3bc2f68d25e0e30"] = KeyInfo($name="EM OV CS CA - G3C (eMudhra Inc)", $ccadb="A012298"),
+	};
+
+	## Information about a known certificate for one of the compromised keys.
+	type CertInfo: record {
+		## Common name of the certificate issuer.
+		issuer: string;
+		## Serial number of the certificate (lowercase hex).
+		serial: string;
+	};
+
+	## Known certificates for the compromised keys, indexed by the lowercase
+	## hex SHA-256 hash of their DER encoding. This is only used to describe
+	## the encountered certificate; detection is based on
+	## :zeek:see:`EmudraWeakKeys::compromised_keys`.
+	option known_certs: table[string] of CertInfo = {
+		["42c4accd12c4f59597925e1a08a7a90102608543809308d50ec427e118ba1493"] = CertInfo($issuer="emSign Root TLS CA - G3", $serial="a4aee678f23362b4c0e460b772f214"),
+		["45a883f349aedfd5f3a649b5498ffb121712ba8b448f3f2a91dbc5a766fcddbe"] = CertInfo($issuer="AAA Certificate Services", $serial="a024fdf4ba665c785ce4a020483858b7"),
+		["98b896625c0c230adeec3eb2cf6aad5001ecf9156a68644e82374ce5833bc25b"] = CertInfo($issuer="emSign Root TLS CA - G3", $serial="6cada367fb1c100088120ea202d568"),
+		["5f1ded4dd590af74631290cf073b122a2aac6a1fa479778a0bd43579bd832699"] = CertInfo($issuer="AAA Certificate Services", $serial="e94223bde92f914e5ab9acabfdac3710"),
+		["e7568fe6e12331f4fd7de61da4c7559d0f8eb192a218d4741a3ba75184333838"] = CertInfo($issuer="emSign Root TLS CA - G3", $serial="c7c41efe92d825f05eae841a4a82c1"),
+		["579480aea166290bd3c643589e795fc0d0e54e86505d180f1dff99efd3199512"] = CertInfo($issuer="AAA Certificate Services", $serial="d8f8685e4f2bd9d82402a85a1c1eb731"),
+		["0164d7ceae5bb909c272af151ff44b1177ae9b47d9424b94f1d9558c30934d19"] = CertInfo($issuer="emSign Root TLS CA - G3", $serial="588b2e3c2bb8cda13e1a1209254321"),
+		["62b7f9868263f72f6911fc78ceaf72c1979158b7368bf648683bb2aa39b02e72"] = CertInfo($issuer="AAA Certificate Services", $serial="91f347f1a5b7d39962b95e0ee4e299d1"),
+		["cb6e15165ac802e9b3f993f16c25d41f4e81c21ebde71ae1b012ac00bf9c7c3f"] = CertInfo($issuer="emSign Root TLS CA - G3", $serial="296926c227a3a1526392b19482a504"),
+		["7485b51c0ed192878fa1d2f948fb529ae1842cc5086c4b67f7be5b2039de9489"] = CertInfo($issuer="AAA Certificate Services", $serial="8d5a4811939ef447d77111cdd9849ae9"),
+		["432ec25f0d28de9006d97bf752f17bbb2cd41f669933fcb072d9a1148d0261f3"] = CertInfo($issuer="emSign Root TLS CA - G3", $serial="8009928a64107601af05fa2f19f109"),
+		["fd9d5c2dbbd4995ab69b8d50c439d9527b00529199c2fd01b2174eb58f07021f"] = CertInfo($issuer="AAA Certificate Services", $serial="05f078752dece7a1bb8595d303167171"),
+		["9e39de2881273acc225a149c72ba3e0f51424963669ab633ee1dc7df5db067b4"] = CertInfo($issuer="emSign Root CS CA - G3", $serial="7818933f8f85b4619a2b35fba83d0a"),
+		["a496e23ac0cab8155fc9b117b97eae368efcbb9041aec8804d5a308d2d01c2d8"] = CertInfo($issuer="AAA Certificate Services", $serial="41e32b73ac185d6ce0d7480bacf84e69"),
+		["4b2460a466f95fd40113bcdcca2ceb29b3b093921de45474da7df48874c630b1"] = CertInfo($issuer="emSign Root CS CA - G3", $serial="544b7f922c31ae220a4a922916f6e6"),
+		["84112972b8e59d14560ae7e7119654474aad119990cf3722bfc1e3b91615e1fd"] = CertInfo($issuer="AAA Certificate Services", $serial="d6a5ef613b390f32ef9cdf349f772841"),
 	};
 }
 
-# Returns the SHA-256 hash of the DER encoding of the certificate. Reuses the
-# fingerprint computed by the base scripts if it is SHA-256.
-function cert_sha256(f: fa_file, cert_ref: opaque of x509): string
-	{
-	if ( X509::hash_function == sha256_hash && f$info?$x509 )
-		return f$info$x509$fingerprint;
-
-	return sha256_hash(x509_get_certificate_string(cert_ref));
-	}
-
-# Priority is lower than the base X509 handler, which sets the fingerprint,
-# and the SSL file_sniff handler, which adds the certificate to the chain.
+# Priority is lower than the SSL file_sniff handler, which adds the
+# certificate to the chain.
 event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certificate) &priority=3
 	{
-	local hash = cert_sha256(f, cert_ref);
-	if ( hash !in compromised_certs )
+	# 4 is SHA-256 in the IANA TLS HashAlgorithm registry.
+	local spki = bytestring_to_hexstr(x509_spki_hash(cert_ref, 4));
+	if ( spki !in compromised_keys )
 		return;
 
-	local ci = compromised_certs[hash];
-	local desc = fmt("compromised eMudhra intermediate %s (CCADB %s)", ci$name, ci$ccadb);
+	local ki = compromised_keys[spki];
+	# Hash the re-encoded certificate, so that trailing data does not matter.
+	local hash = sha256_hash(x509_get_certificate_string(cert_ref));
+
+	local desc: string;
+	if ( hash in known_certs )
+		desc = fmt("compromised eMudhra intermediate %s (CCADB %s), issued by %s",
+		           ki$name, ki$ccadb, known_certs[hash]$issuer);
+	else
+		desc = fmt("unknown certificate with the key of compromised eMudhra intermediate %s (CCADB %s), issued by %s",
+		           ki$name, ki$ccadb, cert$issuer);
+
 	local n = Notice::Info($note=Compromised_Intermediate_Cert, $f=f,
 	                       $msg=fmt("Encountered %s", desc),
 	                       $sub=fmt("sha256: %s", hash),

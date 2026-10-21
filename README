@@ -42,23 +42,41 @@ Since the private keys of these intermediates are compromised, anybody
 can use them to issue certificates for arbitrary names. A chain
 containing one of them should be treated as suspicious.
 
-Detected certificates
----------------------
+Detected keys
+-------------
 
-| Certificate                       | CCADB   | Issuer                  | SHA-256 |
-|-----------------------------------|---------|-------------------------|---------|
-| EM EV TLS CA - G3B (eMudhra BV)   | A012304 | emSign Root TLS CA - G3 | E7568FE6E12331F4FD7DE61DA4C7559D0F8EB192A218D4741A3BA75184333838 |
-| EM OV TLS CA - G3B (eMudhra BV)   | A012308 | emSign Root TLS CA - G3 | 98B896625C0C230ADEEC3EB2CF6AAD5001ECF9156A68644E82374CE5833BC25B |
-| EM DV TLS CA - G3B (eMudhra BV)   | A012302 | emSign Root TLS CA - G3 | 42C4ACCD12C4F59597925E1A08A7A90102608543809308D50EC427E118BA1493 |
-| EM EV TLS CA - G3C (eMudhra Inc)  | A012296 | emSign Root TLS CA - G3 | 432EC25F0D28DE9006D97BF752F17BBB2CD41F669933FCB072D9A1148D0261F3 |
-| EM OV TLS CA - G3C (eMudhra Inc)  | A012300 | emSign Root TLS CA - G3 | CB6E15165AC802E9B3F993F16C25D41F4E81C21EBDE71AE1B012AC00BF9C7C3F |
-| EM DV TLS CA - G3C (eMudhra Inc)  | A012294 | emSign Root TLS CA - G3 | 0164D7CEAE5BB909C272AF151FF44B1177AE9B47D9424B94F1D9558C30934D19 |
-| EM OV CS CA - G3B (eMudhra BV)    | A012306 | emSign Root CS CA - G3  | 9E39DE2881273ACC225A149C72BA3E0F51424963669AB633EE1DC7DF5DB067B4 |
-| EM OV CS CA - G3C (eMudhra Inc)   | A012298 | emSign Root CS CA - G3  | 4B2460A466F95FD40113BCDCCA2CEB29B3B093921DE45474DA7DF48874C630B1 |
+The package matches on the SHA-256 hash of the Subject Public Key Info
+(SPKI) of the certificate, i.e. on the compromised key rather than on a
+specific certificate. This detects the intermediates issued by the
+emSign roots, their cross-signatures by Sectigo (AAA Certificate
+Services), and any other certificate that contains one of these keys -
+including certificates that somebody created using the leaked keys.
 
-The list lives in the `EmudraWeakKeys::compromised_certs` option and can
-be extended via `redef` or the config framework. Keys are the lowercase
-hex SHA-256 hash of the DER-encoded certificate.
+| Intermediate                      | CCADB   | SPKI SHA-256 |
+|-----------------------------------|---------|--------------|
+| EM EV TLS CA - G3B (eMudhra BV)   | A012304 | E0254C7FCDC265E2F0F8A428DABB75AB4AE039B4872D62F5EE57F0877D5A8A41 |
+| EM OV TLS CA - G3B (eMudhra BV)   | A012308 | 43BFFA19D6EF651451F6841E019931E96F6F2EAEFF28AB4B6F1CE4576DE2717B |
+| EM DV TLS CA - G3B (eMudhra BV)   | A012302 | EBED6475C2C2D80FCB199F3FE8DD6E6B3CE60B77EB15D4E42C3DEC0C6F5B5105 |
+| EM EV TLS CA - G3C (eMudhra Inc)  | A012296 | 5C0660A2B164910D8FF589C18E14552E9E0EC237DCEFE2CB736D41A4811F81A0 |
+| EM OV TLS CA - G3C (eMudhra Inc)  | A012300 | 63ECEFEE431D49523BC1136C4E72D0206A477086CAF606CD5CF025686C109CF8 |
+| EM DV TLS CA - G3C (eMudhra Inc)  | A012294 | 49DD353DC2B919A3770645117D0E60C16115E7D1BC259EEFE734B00EA434FE5F |
+| EM OV CS CA - G3B (eMudhra BV)    | A012306 | EC4FFA1AD0AC88081314B7AAFFEF6A91F97CD57291BB5BA686C5415F5EB4F6B6 |
+| EM OV CS CA - G3C (eMudhra Inc)   | A012298 | 92C063D67E8F14DB71D288E11266FFDAF69CBF115F7BAB14F3BC2F68D25E0E30 |
+
+The CCADB IDs refer to the intermediates issued by the emSign roots.
+
+The keys live in the `EmudraWeakKeys::compromised_keys` option, indexed
+by the lowercase hex SPKI SHA-256 hash. The 16 known certificates for
+these keys (8 issued by the emSign roots, 8 cross-signed by Sectigo) are
+listed in `EmudraWeakKeys::known_certs`, indexed by the lowercase hex
+SHA-256 hash of the DER-encoded certificate; this table is only used to
+describe the certificate in the notice. Both options can be extended via
+`redef` or the config framework.
+
+The certificate data was taken from `impacted-intermediates.json`
+published at https://emudhra.we-have-a-problem.com/. All hashes and
+serial numbers were cross-checked against the PEM certificates contained
+in that file.
 
 Usage
 -----
@@ -70,21 +88,21 @@ or load the scripts directly:
     zeek -r trace.pcap /path/to/emudra-weak-keys/scripts
 
 The package checks every certificate that Zeek's X509 analyzer parses
-(the `x509_certificate` event). Certificates are matched on the SHA-256
-hash of their DER encoding as re-encoded by OpenSSL, so data appended
-after the certificate does not change the hash. If
-`X509::hash_function` is the default `sha256_hash`, the fingerprint
-computed by Zeek's base scripts is reused; otherwise the package
-computes the SHA-256 hash itself.
+(the `x509_certificate` event). Since the SPKI hash is computed from the
+parsed certificate, data appended after the certificate does not
+influence it.
 
 When a match is found, a notice of type
 `EmudraWeakKeys::Compromised_Intermediate_Cert` is raised, with `fuid`
-referring to the matching certificate. For certificates seen in SSL/TLS
-(server and client chains), the message names the matching
-intermediate and its position in the chain, and the `sub` field
-contains the leaf certificate subject, the SNI (if present) and the
-SHA-256 hash. Notices are suppressed for one day per server address,
-port and certificate.
+referring to the matching certificate. The message names the
+compromised intermediate and the issuer of the encountered certificate.
+If the certificate is not one of the known certificates, the message
+says so - this might indicate a certificate created using the leaked key.
+For certificates seen in SSL/TLS (server and client chains), the message
+also contains the position in the chain, and the `sub` field contains
+the leaf certificate subject, the SNI (if present) and the SHA-256 hash
+of the certificate. Notices are suppressed for one day per server
+address, port and certificate.
 
 Since the certificate is checked as soon as it is parsed, detection
 does not depend on the TLS handshake completing; clients that already
@@ -93,10 +111,6 @@ distrust these intermediates will typically abort the connection.
 Limitations
 -----------
 
-- Certificates are matched by their exact SHA-256 hash. Cross-signed
-  variants of these intermediates (e.g. the ones signed by Sectigo)
-  have different hashes and are only detected if their hashes are added
-  to `EmudraWeakKeys::compromised_certs`.
 - Only certificates that Zeek passes to the X509 analyzer are checked:
   SSL/TLS and DTLS chains, as well as certificates in RDP and Kerberos
   (PKINIT). Certificates transferred as files (e.g. downloaded over
@@ -104,6 +118,8 @@ Limitations
 - In TLS 1.3 the certificate chain is encrypted and cannot be seen by
   Zeek, so detection only works for TLS 1.2 and earlier (unless
   decryption is used).
-- A server that omits the intermediate from the chain it sends will not
-  be detected.
+- Only certificates containing one of the compromised keys are
+  detected. Leaf certificates issued by one of the compromised
+  intermediates are not detected if the server omits the intermediate
+  from the chain it sends.
 - The two code-signing CAs will usually not appear in TLS traffic.
