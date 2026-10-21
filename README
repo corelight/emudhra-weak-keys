@@ -106,7 +106,7 @@ of the certificate.
 Notices are suppressed for `EMudhraWeakKeys::suppression_interval`
 (default: one day) per host presenting the certificate chain - server
 address and port for server chains, client address for client chains -
-and certificate. The accepted notices (see below) are suppressed per
+and certificate. The established notices (see below) are suppressed per
 client address, server address and certificate, so that every client
 that accepts a chain is reported.
 
@@ -119,7 +119,7 @@ of the connection. Certificates seen in other protocols are checked as
 soon as they are parsed.
 
 If the SSL/TLS connection is established, a second notice
-of type `EMudhraWeakKeys::Compromised_Intermediate_Cert_Accepted` is
+of type `EMudhraWeakKeys::Compromised_Intermediate_Cert_Established` is
 raised, with the same details. Zeek considers a connection established
 once both sides have switched to encrypted communication - in TLS 1.2,
 a client only does this after accepting the server certificate chain
@@ -143,7 +143,7 @@ they are being phased out: the Chrome Root Program requires subscriber
 certificates issued from March 15, 2027 on to only assert TLS server
 authentication. Also note that servers that request client
 certificates optionally may complete the handshake without validating
-the client certificate, so for client chains the accepted notices are a
+the client certificate, so for client chains the established notices are a
 weaker indication that the chain was accepted.
 
 Chains without the compromised intermediate
@@ -169,7 +169,7 @@ insignificant whitespace.
 If a match is found, a notice of type
 `EMudhraWeakKeys::Compromised_Intermediate_Issuer` is raised; if the
 connection is established, an additional
-`EMudhraWeakKeys::Compromised_Intermediate_Issuer_Accepted` notice is
+`EMudhraWeakKeys::Compromised_Intermediate_Issuer_Established` notice is
 raised. The `sub` field contains the leaf certificate subject, the SNI
 (if present) and the SHA-256 hash of the matching certificate.
 

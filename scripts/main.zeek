@@ -35,7 +35,7 @@ export {
 		## server or client certificate chain contained a certificate with the
 		## public key of one of the compromised eMudhra intermediate CAs. This
 		## means that the peer accepted the chain, or did not validate it.
-		Compromised_Intermediate_Cert_Accepted,
+		Compromised_Intermediate_Cert_Established,
 		## Indicates that an SSL/TLS certificate chain contained a certificate
 		## issued by one of the compromised eMudhra intermediate CAs (based on
 		## the issuer name), while the chain did not contain a certificate with
@@ -44,7 +44,7 @@ export {
 		## Indicates that an SSL/TLS connection was established with a chain
 		## for which :zeek:see:`EMudhraWeakKeys::Compromised_Intermediate_Issuer`
 		## was raised.
-		Compromised_Intermediate_Issuer_Accepted,
+		Compromised_Intermediate_Issuer_Established,
 	};
 
 	## Information about a compromised key.
@@ -99,7 +99,7 @@ export {
 	## How long notices are suppressed. Notices are suppressed per host
 	## presenting the certificate chain (server address and port for server
 	## chains, client address for client chains) and certificate. The
-	## accepted notices are suppressed per client address, server address and
+	## established notices are suppressed per client address, server address and
 	## certificate, so that every client accepting a chain is reported.
 	option suppression_interval = 1day;
 
@@ -229,7 +229,7 @@ function check_chain_keys(c: connection, chain: vector of Files::Info, side: str
 
 		found = T;
 		report(c, chain, i, side, established,
-		       Compromised_Intermediate_Cert, Compromised_Intermediate_Cert_Accepted,
+		       Compromised_Intermediate_Cert, Compromised_Intermediate_Cert_Established,
 		       describe_key_cert(compromised_keys[spki], info$certificate, cert_hash(info$handle)), "");
 		}
 
@@ -255,7 +255,7 @@ function check_chain_issuers(c: connection, chain: vector of Files::Info, side: 
 
 		local ki = compromised_keys[compromised_subjects[issuer]];
 		report(c, chain, i, side, established,
-		       Compromised_Intermediate_Issuer, Compromised_Intermediate_Issuer_Accepted,
+		       Compromised_Intermediate_Issuer, Compromised_Intermediate_Issuer_Established,
 		       fmt("%s, issued by compromised eMudhra intermediate %s (CCADB %s)", cert$subject, ki$name, ki$ccadb),
 		       ", but not the intermediate itself");
 		}
