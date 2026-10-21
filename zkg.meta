@@ -8,7 +8,7 @@ description = Raises a notice when encountering one of
 	e.g. as part of an SSL/TLS certificate chain.
 tags = ssl, tls, x509, certificate, emudhra, notice
 depends = 
-	zeek >=4.0.0
+	zeek >=8.0.0
 
 [template]
 source = https://github.com/zeek/package-template
