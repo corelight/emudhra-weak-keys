@@ -101,8 +101,14 @@ says so - this might indicate a certificate created using the leaked key.
 For certificates seen in SSL/TLS (server and client chains), the message
 also contains the position in the chain, and the `sub` field contains
 the leaf certificate subject, the SNI (if present) and the SHA-256 hash
-of the certificate. Notices are suppressed for one day per server
-address, port and certificate.
+of the certificate.
+
+Notices are suppressed for `EMudhraWeakKeys::suppression_interval`
+(default: one day) per host presenting the certificate chain - server
+address and port for server chains, client address for client chains -
+and certificate. The accepted notices (see below) are suppressed per
+client address, server address and certificate, so that every client
+that accepts a chain is reported.
 
 Since the certificate is checked as soon as it is parsed, detection
 does not depend on the TLS handshake completing; clients that already

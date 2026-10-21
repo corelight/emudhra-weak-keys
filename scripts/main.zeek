@@ -94,6 +94,13 @@ export {
 	## that do not match, adjust this pattern.
 	option issuer_prefilter = /emudhra/i;
 
+	## How long notices are suppressed. Notices are suppressed per host
+	## presenting the certificate chain (server address and port for server
+	## chains, client address for client chains) and certificate. The
+	## accepted notices are suppressed per client address, server address and
+	## certificate, so that every client accepting a chain is reported.
+	option suppression_interval = 1day;
+
 	## Information about a known certificate for one of the compromised keys.
 	type CertInfo: record {
 		## Common name of the certificate issuer.
@@ -137,7 +144,8 @@ type ChainMatch: record {
 	# Sub field of the notice.
 	sub: string;
 	fuid: string;
-	identifier: string;
+	# SHA-256 hash of the certificate.
+	hash: string;
 };
 
 redef record SSL::Info += {
@@ -148,6 +156,19 @@ redef record SSL::Info += {
 	## by compromised intermediates.
 	emudhra_issuers_checked: bool &default=F;
 };
+
+# Returns the identifier used to suppress notices about certificate hash in an
+# SSL/TLS chain of c. See EMudhraWeakKeys::suppression_interval.
+function chain_identifier(c: connection, side: string, accepted: bool, hash: string): string
+	{
+	if ( accepted )
+		return cat_sep("|", "", c$id$orig_h, c$id$resp_h, hash);
+
+	if ( side == "Client" )
+		return cat_sep("|", "", c$id$orig_h, hash);
+
+	return cat_sep("|", "", c$id$resp_h, c$id$resp_p, hash);
+	}
 
 function normalize_name(name: string): string
 	{
@@ -185,21 +206,20 @@ function check_chain_issuers(c: connection, chain: vector of Files::Info, side: 
 		local desc = fmt("%s certificate chain contains %s at position %d, issued by compromised eMudhra intermediate %s (CCADB %s), but not the intermediate itself",
 		                 side, info$certificate$subject, i, ki$name, ki$ccadb);
 		local notice_sub = fmt("leaf: %s%s; sha256: %s", leaf, sni, hash);
-		local identifier = cat(c$id$resp_h, c$id$resp_p, hash);
 
 		NOTICE(Notice::Info($note=Compromised_Intermediate_Issuer,
 		                    $conn=c, $fuid=chain[i]$fuid,
 		                    $msg=desc, $sub=notice_sub,
-		                    $identifier=identifier,
-		                    $suppress_for=1day));
+		                    $identifier=chain_identifier(c, side, F, hash),
+		                    $suppress_for=suppression_interval));
 
 		if ( established )
 			NOTICE(Notice::Info($note=Compromised_Intermediate_Issuer_Accepted,
 			                    $conn=c, $fuid=chain[i]$fuid,
 			                    $msg=fmt("SSL/TLS connection established; %s", desc),
 			                    $sub=notice_sub,
-			                    $identifier=identifier,
-			                    $suppress_for=1day));
+			                    $identifier=chain_identifier(c, side, T, hash),
+			                    $suppress_for=suppression_interval));
 		}
 	}
 
@@ -242,7 +262,7 @@ event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certifi
 	                       $msg=fmt("Encountered %s", desc),
 	                       $sub=fmt("sha256: %s", hash),
 	                       $identifier=hash,
-	                       $suppress_for=1day);
+	                       $suppress_for=suppression_interval);
 
 	if ( f?$conns && |f$conns| == 1 )
 		{
@@ -251,7 +271,7 @@ event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certifi
 			break;
 
 		n$conn = c;
-		n$identifier = cat(c$id$resp_h, c$id$resp_p, hash);
+		n$identifier = cat_sep("|", "", c$id$resp_h, c$id$resp_p, hash);
 
 		if ( c?$ssl && c$ssl?$cert_chain )
 			{
@@ -265,9 +285,10 @@ event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certifi
 				local sni = c$ssl?$server_name ? fmt(", SNI %s", c$ssl$server_name) : "";
 				local m = ChainMatch($side=f$is_orig ? "Client" : "Server", $desc=desc, $position=i,
 				                     $sub=fmt("leaf: %s%s; sha256: %s", leaf, sni, hash),
-				                     $fuid=f$id, $identifier=n$identifier);
+				                     $fuid=f$id, $hash=hash);
 				n$msg = fmt("%s certificate chain contains %s at position %d", m$side, desc, i);
 				n$sub = m$sub;
+				n$identifier = chain_identifier(c, m$side, F, hash);
 
 				if ( ! c$ssl?$emudhra_matches )
 					c$ssl$emudhra_matches = vector();
@@ -308,7 +329,7 @@ event ssl_established(c: connection)
 		                    $msg=fmt("SSL/TLS connection established with %s certificate chain containing %s at position %d",
 		                             to_lower(m$side), m$desc, m$position),
 		                    $sub=m$sub,
-		                    $identifier=m$identifier,
-		                    $suppress_for=1day));
+		                    $identifier=chain_identifier(c, m$side, T, m$hash),
+		                    $suppress_for=suppression_interval));
 		}
 	}
