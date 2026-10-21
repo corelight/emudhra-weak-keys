@@ -23,7 +23,7 @@
 @load base/files/x509
 @load base/frameworks/notice
 
-module EmudraWeakKeys;
+module EMudhraWeakKeys;
 
 export {
 	redef enum Notice::Type += {
@@ -41,7 +41,7 @@ export {
 		## the public key of any of the compromised intermediates.
 		Compromised_Intermediate_Issuer,
 		## Indicates that an SSL/TLS connection was established with a chain
-		## for which :zeek:see:`EmudraWeakKeys::Compromised_Intermediate_Issuer`
+		## for which :zeek:see:`EMudhraWeakKeys::Compromised_Intermediate_Issuer`
 		## was raised.
 		Compromised_Intermediate_Issuer_Accepted,
 	};
@@ -68,8 +68,8 @@ export {
 	};
 
 	## Subject names of the compromised intermediate CAs, mapped to the
-	## SPKI hash of their key in :zeek:see:`EmudraWeakKeys::compromised_keys`.
-	## Names are normalized using :zeek:see:`EmudraWeakKeys::normalize_name`.
+	## SPKI hash of their key in :zeek:see:`EMudhraWeakKeys::compromised_keys`.
+	## Names are normalized using :zeek:see:`EMudhraWeakKeys::normalize_name`.
 	option compromised_subjects: table[string] of string = {
 		["cn=emdvtlsca-g3b,o=emudhrabv,c=nl"] = "ebed6475c2c2d80fcb199f3fe8dd6e6b3ce60b77eb15d4e42c3dec0c6f5b5105",
 		["cn=emovtlsca-g3b,o=emudhrabv,c=nl"] = "43bffa19d6ef651451f6841e019931e96f6f2eaeff28ab4b6f1ce4576de2717b",
@@ -89,7 +89,7 @@ export {
 	global normalize_name: function(name: string): string;
 
 	## Issuer names have to match this pattern to be checked against
-	## :zeek:see:`EmudraWeakKeys::compromised_subjects`. This avoids
+	## :zeek:see:`EMudhraWeakKeys::compromised_subjects`. This avoids
 	## normalizing the issuer name of every certificate. If you add subjects
 	## that do not match, adjust this pattern.
 	option issuer_prefilter = /emudhra/i;
@@ -105,7 +105,7 @@ export {
 	## Known certificates for the compromised keys, indexed by the lowercase
 	## hex SHA-256 hash of their DER encoding. This is only used to describe
 	## the encountered certificate; detection is based on
-	## :zeek:see:`EmudraWeakKeys::compromised_keys`.
+	## :zeek:see:`EMudhraWeakKeys::compromised_keys`.
 	option known_certs: table[string] of CertInfo = {
 		["42c4accd12c4f59597925e1a08a7a90102608543809308d50ec427e118ba1493"] = CertInfo($issuer="emSign Root TLS CA - G3", $serial="a4aee678f23362b4c0e460b772f214"),
 		["45a883f349aedfd5f3a649b5498ffb121712ba8b448f3f2a91dbc5a766fcddbe"] = CertInfo($issuer="AAA Certificate Services", $serial="a024fdf4ba665c785ce4a020483858b7"),

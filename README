@@ -65,10 +65,10 @@ including certificates that somebody created using the leaked keys.
 
 The CCADB IDs refer to the intermediates issued by the emSign roots.
 
-The keys live in the `EmudraWeakKeys::compromised_keys` option, indexed
+The keys live in the `EMudhraWeakKeys::compromised_keys` option, indexed
 by the lowercase hex SPKI SHA-256 hash. The 16 known certificates for
 these keys (8 issued by the emSign roots, 8 cross-signed by Sectigo) are
-listed in `EmudraWeakKeys::known_certs`, indexed by the lowercase hex
+listed in `EMudhraWeakKeys::known_certs`, indexed by the lowercase hex
 SHA-256 hash of the DER-encoded certificate; this table is only used to
 describe the certificate in the notice. Both options can be extended via
 `redef` or the config framework.
@@ -93,7 +93,7 @@ parsed certificate, data appended after the certificate does not
 influence it.
 
 When a match is found, a notice of type
-`EmudraWeakKeys::Compromised_Intermediate_Cert` is raised, with `fuid`
+`EMudhraWeakKeys::Compromised_Intermediate_Cert` is raised, with `fuid`
 referring to the matching certificate. The message names the
 compromised intermediate and the issuer of the encountered certificate.
 If the certificate is not one of the known certificates, the message
@@ -109,7 +109,7 @@ does not depend on the TLS handshake completing; clients that already
 distrust these intermediates will typically abort the connection.
 
 If the SSL/TLS connection is subsequently established, a second notice
-of type `EmudraWeakKeys::Compromised_Intermediate_Cert_Accepted` is
+of type `EMudhraWeakKeys::Compromised_Intermediate_Cert_Accepted` is
 raised, with the same details. Zeek considers a connection established
 once both sides have switched to encrypted communication - in TLS 1.2,
 a client only does this after accepting the server certificate chain
@@ -136,9 +136,9 @@ should validate. Names are compared case-insensitively and ignoring
 insignificant whitespace.
 
 If a match is found, a notice of type
-`EmudraWeakKeys::Compromised_Intermediate_Issuer` is raised; if the
+`EMudhraWeakKeys::Compromised_Intermediate_Issuer` is raised; if the
 connection is established, an additional
-`EmudraWeakKeys::Compromised_Intermediate_Issuer_Accepted` notice is
+`EMudhraWeakKeys::Compromised_Intermediate_Issuer_Accepted` notice is
 raised. The `sub` field contains the leaf certificate subject, the SNI
 (if present) and the SHA-256 hash of the matching certificate.
 
@@ -146,10 +146,10 @@ These checks happen once the chain is complete: when the connection is
 established, or when it ends otherwise. For aborted connections the
 notice is therefore only raised at the end of the connection.
 
-The subject names live in the `EmudraWeakKeys::compromised_subjects`
-option, normalized using `EmudraWeakKeys::normalize_name` (lowercased,
+The subject names live in the `EMudhraWeakKeys::compromised_subjects`
+option, normalized using `EMudhraWeakKeys::normalize_name` (lowercased,
 with all whitespace removed). To keep this cheap, only issuer names
-matching the `EmudraWeakKeys::issuer_prefilter` pattern (by default
+matching the `EMudhraWeakKeys::issuer_prefilter` pattern (by default
 `/emudhra/i`) are normalized and looked up; when adding subjects that do
 not contain "emudhra", adjust the pattern as well.
 
