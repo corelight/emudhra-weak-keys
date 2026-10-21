@@ -1,9 +1,6 @@
 emudra-weak-keys
 ================
 
-> **Note:** This package was created with the help of Claude Opus 5.5.
-> All code and text was reviewed & verified manually.
-
 This is a Zeek package to detect connections that use eMudhra intermediate
 CA certificates with compromised/well-known private keys.
 
@@ -118,3 +115,7 @@ Limitations
 - The issuer name check does not apply to certificates seen in non-TLS
   protocols. Some name normalization is performed for the issuer check,
   but this does not cover all possible cases.
+
+
+> **Note:** This package was created with the help of Claude Opus 5.5.
+> All code and text was reviewed, edited & verified manually.
