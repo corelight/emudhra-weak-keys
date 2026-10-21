@@ -108,6 +108,16 @@ Since the certificate is checked as soon as it is parsed, detection
 does not depend on the TLS handshake completing; clients that already
 distrust these intermediates will typically abort the connection.
 
+If the SSL/TLS connection is subsequently established, a second notice
+of type `EmudraWeakKeys::Compromised_Intermediate_Cert_Accepted` is
+raised, with the same details. Zeek considers a connection established
+once both sides have switched to encrypted communication - in TLS 1.2,
+a client only does this after accepting the server certificate chain
+(and a server only after accepting the client certificate chain). This
+notice therefore indicates that the peer accepted the chain - or did not
+validate it at all, which is common for e.g. `curl -k`, malware or IoT
+devices. It does not indicate that application data was exchanged.
+
 Limitations
 -----------
 

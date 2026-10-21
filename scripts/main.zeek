@@ -8,7 +8,8 @@
 ##! as well as any other certificate created for these keys. Every certificate
 ##! parsed by the X509 analyzer is checked. For certificates seen in SSL/TLS
 ##! (both server and client chains), the notice contains information about the
-##! chain.
+##! chain, and a second notice is raised if the SSL/TLS connection is
+##! established - i.e. the peer did not reject the chain.
 
 @load base/protocols/ssl
 @load base/files/x509
@@ -21,6 +22,11 @@ export {
 		## Indicates that a certificate containing the public key of one of
 		## the compromised eMudhra intermediate CAs was encountered.
 		Compromised_Intermediate_Cert,
+		## Indicates that an SSL/TLS connection was established although the
+		## server or client certificate chain contained a certificate with the
+		## public key of one of the compromised eMudhra intermediate CAs. This
+		## means that the peer accepted the chain, or did not validate it.
+		Compromised_Intermediate_Cert_Accepted,
 	};
 
 	## Information about a compromised key.
@@ -76,6 +82,26 @@ export {
 	};
 }
 
+# A compromised certificate seen in an SSL/TLS certificate chain.
+type ChainMatch: record {
+	# "Server" or "Client".
+	side: string;
+	# Description of the certificate.
+	desc: string;
+	# Position in the chain.
+	position: count;
+	# Sub field of the notice.
+	sub: string;
+	fuid: string;
+	identifier: string;
+};
+
+redef record SSL::Info += {
+	## Compromised certificates seen in the certificate chains of this
+	## connection.
+	emudhra_matches: vector of ChainMatch &optional;
+};
+
 # Priority is lower than the SSL file_sniff handler, which adds the
 # certificate to the chain.
 event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certificate) &priority=3
@@ -122,13 +148,37 @@ event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certifi
 
 				local leaf = ( chain[0]?$x509 ) ? chain[0]$x509$certificate$subject : "<unknown>";
 				local sni = c$ssl?$server_name ? fmt(", SNI %s", c$ssl$server_name) : "";
-				n$msg = fmt("%s certificate chain contains %s at position %d",
-				            f$is_orig ? "Client" : "Server", desc, i);
-				n$sub = fmt("leaf: %s%s; sha256: %s", leaf, sni, hash);
+				local m = ChainMatch($side=f$is_orig ? "Client" : "Server", $desc=desc, $position=i,
+				                     $sub=fmt("leaf: %s%s; sha256: %s", leaf, sni, hash),
+				                     $fuid=f$id, $identifier=n$identifier);
+				n$msg = fmt("%s certificate chain contains %s at position %d", m$side, desc, i);
+				n$sub = m$sub;
+
+				if ( ! c$ssl?$emudhra_matches )
+					c$ssl$emudhra_matches = vector();
+				c$ssl$emudhra_matches += m;
 				break;
 				}
 			}
 		}
 
 	NOTICE(n);
+	}
+
+event ssl_established(c: connection)
+	{
+	if ( ! c$ssl?$emudhra_matches )
+		return;
+
+	for ( i in c$ssl$emudhra_matches )
+		{
+		local m = c$ssl$emudhra_matches[i];
+		NOTICE(Notice::Info($note=Compromised_Intermediate_Cert_Accepted,
+		                    $conn=c, $fuid=m$fuid,
+		                    $msg=fmt("SSL/TLS connection established with %s certificate chain containing %s at position %d",
+		                             to_lower(m$side), m$desc, m$position),
+		                    $sub=m$sub,
+		                    $identifier=m$identifier,
+		                    $suppress_for=1day));
+		}
 	}
