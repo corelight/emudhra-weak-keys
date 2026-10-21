@@ -9,8 +9,9 @@
 ##! parsed by the X509 analyzer is checked. Certificates seen in SSL/TLS (both
 ##! server and client chains) are checked once the chain is complete - when the
 ##! connection is established, or when it ends otherwise. The notice contains
-##! information about the chain, and a second notice is raised if the SSL/TLS
-##! connection is established - i.e. the peer did not reject the chain.
+##! information about the chain. For server chains, a second notice is raised
+##! if the SSL/TLS connection is established - i.e. the client did not reject
+##! the chain.
 ##!
 ##! Additionally, SSL/TLS certificate chains that do not contain any of the
 ##! compromised keys are checked for certificates whose issuer is one of the
@@ -32,18 +33,21 @@ export {
 		## the compromised eMudhra intermediate CAs was encountered.
 		Compromised_Intermediate_Cert,
 		## Indicates that an SSL/TLS connection was established although the
-		## server or client certificate chain contained a certificate with the
-		## public key of one of the compromised eMudhra intermediate CAs. This
-		## means that the peer accepted the chain, or did not validate it.
+		## server certificate chain contained a certificate with the public key
+		## of one of the compromised eMudhra intermediate CAs. This means that
+		## the client accepted the chain, or did not validate it. This is not
+		## raised for client certificate chains, since clients control whether
+		## they send them, and servers may not validate them.
 		Compromised_Intermediate_Cert_Established,
 		## Indicates that an SSL/TLS certificate chain contained a certificate
 		## issued by one of the compromised eMudhra intermediate CAs (based on
 		## the issuer name), while the chain did not contain a certificate with
 		## the public key of any of the compromised intermediates.
 		Compromised_Intermediate_Issuer,
-		## Indicates that an SSL/TLS connection was established with a chain
-		## for which :zeek:see:`EMudhraWeakKeys::Compromised_Intermediate_Issuer`
-		## was raised.
+		## Indicates that an SSL/TLS connection was established with a server
+		## certificate chain for which
+		## :zeek:see:`EMudhraWeakKeys::Compromised_Intermediate_Issuer` was
+		## raised.
 		Compromised_Intermediate_Issuer_Established,
 	};
 
@@ -96,11 +100,15 @@ export {
 	## that do not match, adjust this pattern.
 	option issuer_prefilter = /emudhra/i;
 
-	## How long notices are suppressed. Notices are suppressed per host
-	## presenting the certificate chain (server address and port for server
-	## chains, client address for client chains) and certificate. The
-	## established notices are suppressed per client address, server address and
-	## certificate, so that every client accepting a chain is reported.
+	## How long notices are suppressed. Notices are suppressed per server
+	## (address and port), side of the connection presenting the certificate,
+	## and compromised key - not per certificate, as anyone can create
+	## arbitrarily many certificates containing one of the leaked public keys.
+	## For client certificates, this means one notice per server, as clients
+	## (and their addresses) are under the control of potential attackers. The
+	## established notices are suppressed per client address, server address
+	## and compromised key, so that every client accepting a chain is
+	## reported.
 	option suppression_interval = 1day;
 
 	## Known certificates for the compromised keys (the intermediates issued
@@ -133,18 +141,15 @@ redef record SSL::Info += {
 	emudhra_checked: bool &default=F;
 };
 
-# Returns the identifier used to suppress notices about the certificate with
-# the given hash, presented by side ("Server" or "Client") of c. See
-# EMudhraWeakKeys::suppression_interval.
-function notice_identifier(c: connection, side: string, accepted: bool, hash: string): string
+# Returns the identifier used to suppress notices about a certificate with, or
+# issued by, the compromised key spki, presented by side ("Server" or "Client")
+# of c. See EMudhraWeakKeys::suppression_interval.
+function notice_identifier(c: connection, side: string, established: bool, spki: string): string
 	{
-	if ( accepted )
-		return cat_sep("|", "", c$id$orig_h, c$id$resp_h, hash);
+	if ( established )
+		return cat_sep("|", "", c$id$orig_h, c$id$resp_h, spki);
 
-	if ( side == "Client" )
-		return cat_sep("|", "", c$id$orig_h, hash);
-
-	return cat_sep("|", "", c$id$resp_h, c$id$resp_p, hash);
+	return cat_sep("|", "", side, c$id$resp_h, c$id$resp_p, spki);
 	}
 
 function normalize_name(name: string): string
@@ -179,35 +184,38 @@ function describe_key_cert(ki: KeyInfo, cert: X509::Certificate, hash: string): 
 	}
 
 # Raises the notices for the certificate at the given position of an SSL/TLS
-# certificate chain. The message is "<side> certificate chain contains <desc>
-# at position <position><suffix>".
+# certificate chain, which contains, or was issued by, the compromised key spki.
+# The message is "<side> certificate chain contains <desc> at position
+# <position><suffix>".
 function report(c: connection, chain: vector of Files::Info, position: count, side: string,
-                established: bool, seen: Notice::Type, accepted: Notice::Type,
-                desc: string, suffix: string)
+                established: bool, seen_note: Notice::Type, established_note: Notice::Type,
+                spki: string, desc: string, suffix: string)
 	{
 	local f = chain[position];
 	local hash = cert_hash(f$x509$handle);
 	local leaf = chain[0]?$x509 ? chain[0]$x509$certificate$subject : "<unknown>";
 	local sni = c$ssl?$server_name ? fmt(", SNI %s", c$ssl$server_name) : "";
 
-	local n = Notice::Info($note=seen, $conn=c, $fuid=f$fuid,
+	local n = Notice::Info($note=seen_note, $conn=c, $fuid=f$fuid,
 	                       $msg=fmt("%s certificate chain contains %s at position %d%s", side, desc, position, suffix),
 	                       $sub=fmt("leaf: %s%s; sha256: %s", leaf, sni, hash),
-	                       $identifier=notice_identifier(c, side, F, hash),
+	                       $identifier=notice_identifier(c, side, F, spki),
 	                       $suppress_for=suppression_interval);
 	if ( f?$mime_type )
 		n$file_mime_type = f$mime_type;
 
 	NOTICE(n);
 
-	if ( ! established )
+	# Clients control whether they send a certificate chain, and servers may
+	# not validate it, so this is only interesting for server chains.
+	if ( ! established || side != "Server" )
 		return;
 
 	local a = copy(n);
-	a$note = accepted;
+	a$note = established_note;
 	a$msg = fmt("SSL/TLS connection established with %s certificate chain containing %s at position %d%s",
 	            to_lower(side), desc, position, suffix);
-	a$identifier = notice_identifier(c, side, T, hash);
+	a$identifier = notice_identifier(c, side, T, spki);
 	NOTICE(a);
 	}
 
@@ -229,7 +237,7 @@ function check_chain_keys(c: connection, chain: vector of Files::Info, side: str
 
 		found = T;
 		report(c, chain, i, side, established,
-		       Compromised_Intermediate_Cert, Compromised_Intermediate_Cert_Established,
+		       Compromised_Intermediate_Cert, Compromised_Intermediate_Cert_Established, spki,
 		       describe_key_cert(compromised_keys[spki], info$certificate, cert_hash(info$handle)), "");
 		}
 
@@ -253,9 +261,10 @@ function check_chain_issuers(c: connection, chain: vector of Files::Info, side: 
 		if ( issuer !in compromised_subjects || compromised_subjects[issuer] !in compromised_keys )
 			next;
 
-		local ki = compromised_keys[compromised_subjects[issuer]];
+		local spki = compromised_subjects[issuer];
+		local ki = compromised_keys[spki];
 		report(c, chain, i, side, established,
-		       Compromised_Intermediate_Issuer, Compromised_Intermediate_Issuer_Established,
+		       Compromised_Intermediate_Issuer, Compromised_Intermediate_Issuer_Established, spki,
 		       fmt("%s, issued by compromised eMudhra intermediate %s (CCADB %s)", cert$subject, ki$name, ki$ccadb),
 		       ", but not the intermediate itself");
 		}
@@ -316,14 +325,14 @@ event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certifi
 	local n = Notice::Info($note=Compromised_Intermediate_Cert, $f=f,
 	                       $msg=fmt("Encountered %s", describe_key_cert(compromised_keys[spki], cert, hash)),
 	                       $sub=fmt("sha256: %s", hash),
-	                       $identifier=hash,
+	                       $identifier=spki,
 	                       $suppress_for=suppression_interval);
 
 	if ( f?$conns && |f$conns| == 1 )
 		for ( cid in f$conns )
 			{
 			n$conn = f$conns[cid];
-			n$identifier = notice_identifier(n$conn, f$is_orig ? "Client" : "Server", F, hash);
+			n$identifier = notice_identifier(n$conn, f$is_orig ? "Client" : "Server", F, spki);
 			}
 
 	NOTICE(n);

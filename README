@@ -104,11 +104,16 @@ the leaf certificate subject, the SNI (if present) and the SHA-256 hash
 of the certificate.
 
 Notices are suppressed for `EMudhraWeakKeys::suppression_interval`
-(default: one day) per host presenting the certificate chain - server
-address and port for server chains, client address for client chains -
-and certificate. The established notices (see below) are suppressed per
-client address, server address and certificate, so that every client
-that accepts a chain is reported.
+(default: one day) per server address and port, side presenting the
+certificate (server or client), and compromised key. They are not
+suppressed per certificate, since anyone can create arbitrarily many
+certificates containing one of the leaked public keys; this way, such
+certificates cannot be used to flood notices. For the same reason,
+notices about client certificates are suppressed per server rather than
+per client address, as clients are under the control of potential
+attackers. The established notices (see below) are suppressed per
+client address, server address and compromised key, so that every
+client that accepts a chain is reported.
 
 SSL/TLS certificate chains are checked once they are complete: when the
 connection is established, or - if it is not - when it ends. Detection
@@ -118,15 +123,15 @@ connection. For such connections, the notice is only raised at the end
 of the connection. Certificates seen in other protocols are checked as
 soon as they are parsed.
 
-If the SSL/TLS connection is established, a second notice
-of type `EMudhraWeakKeys::Compromised_Intermediate_Cert_Established` is
-raised, with the same details. Zeek considers a connection established
-once both sides have switched to encrypted communication - in TLS 1.2,
-a client only does this after accepting the server certificate chain
-(and a server only after accepting the client certificate chain). This
-notice therefore indicates that the peer accepted the chain - or did not
-validate it at all, which is common for e.g. `curl -k`, malware or IoT
-devices. It does not indicate that application data was exchanged.
+For server certificate chains, if the SSL/TLS connection is
+established, a second notice of type
+`EMudhraWeakKeys::Compromised_Intermediate_Cert_Established` is raised,
+with the same details. Zeek considers a connection established once both
+sides have switched to encrypted communication - in TLS 1.2, a client
+only does this after accepting the server certificate chain. This
+notice therefore indicates that the client accepted the chain - or did
+not validate it at all, which is common for e.g. `curl -k`, malware or
+IoT devices. It does not indicate that application data was exchanged.
 
 Client certificates
 -------------------
@@ -141,10 +146,15 @@ accepts depends on the trust store it uses for client authentication.
 In practice, client certificates issued by public CAs are rare, and
 they are being phased out: the Chrome Root Program requires subscriber
 certificates issued from March 15, 2027 on to only assert TLS server
-authentication. Also note that servers that request client
-certificates optionally may complete the handshake without validating
-the client certificate, so for client chains the established notices are a
-weaker indication that the chain was accepted.
+authentication.
+
+No established notices are raised for client certificate chains:
+clients control whether they send a certificate chain - a malicious
+client can send one of the (public) compromised intermediates, or
+certificates created with the leaked keys, to trigger notices - and
+servers that request client certificates optionally may complete the
+handshake without validating them. An established connection therefore
+says little about whether the chain was accepted.
 
 Chains without the compromised intermediate
 -------------------------------------------
@@ -167,8 +177,8 @@ that should validate. Names are compared case-insensitively and ignoring
 insignificant whitespace.
 
 If a match is found, a notice of type
-`EMudhraWeakKeys::Compromised_Intermediate_Issuer` is raised; if the
-connection is established, an additional
+`EMudhraWeakKeys::Compromised_Intermediate_Issuer` is raised; for
+server chains, if the connection is established, an additional
 `EMudhraWeakKeys::Compromised_Intermediate_Issuer_Established` notice is
 raised. The `sub` field contains the leaf certificate subject, the SNI
 (if present) and the SHA-256 hash of the matching certificate.
