@@ -83,7 +83,8 @@ export {
 	};
 
 	## Normalizes a distinguished name, as rendered by Zeek, for comparison:
-	## lowercases it and removes all whitespace and backslashes. Clients
+	## lowercases it and removes all whitespace (including escaped spaces;
+	## other escapes are kept). Clients
 	## compare names case-insensitively and ignoring insignificant
 	## whitespace, so a rogue certificate could vary them. This normalizes
 	## more than clients do, which is fine for detection.
@@ -133,9 +134,9 @@ redef record SSL::Info += {
 };
 
 # Returns the identifier used to suppress notices about the certificate with
-# the given hash in an SSL/TLS chain of c. See
+# the given hash, presented by side ("Server" or "Client") of c. See
 # EMudhraWeakKeys::suppression_interval.
-function chain_identifier(c: connection, side: string, accepted: bool, hash: string): string
+function notice_identifier(c: connection, side: string, accepted: bool, hash: string): string
 	{
 	if ( accepted )
 		return cat_sep("|", "", c$id$orig_h, c$id$resp_h, hash);
@@ -148,8 +149,11 @@ function chain_identifier(c: connection, side: string, accepted: bool, hash: str
 
 function normalize_name(name: string): string
 	{
-	# Backslashes, as RFC 2253 escapes leading and trailing spaces.
-	return gsub(to_lower(name), /[ \t\r\n\\]+/, "");
+	# RFC 2253 escapes leading and trailing spaces with a backslash. Other
+	# escapes, e.g. of commas within a value, are kept, so that they cannot be
+	# confused with separators.
+	local s = gsub(to_lower(name), /\\ /, "");
+	return gsub(s, /[ \t\r\n]+/, "");
 	}
 
 # Returns the SHA-256 hash of the certificate. The certificate is re-encoded,
@@ -189,7 +193,7 @@ function report(c: connection, chain: vector of Files::Info, position: count, si
 	local n = Notice::Info($note=seen, $conn=c, $fuid=f$fuid,
 	                       $msg=fmt("%s certificate chain contains %s at position %d%s", side, desc, position, suffix),
 	                       $sub=fmt("leaf: %s%s; sha256: %s", leaf, sni, hash),
-	                       $identifier=chain_identifier(c, side, F, hash),
+	                       $identifier=notice_identifier(c, side, F, hash),
 	                       $suppress_for=suppression_interval);
 	if ( f?$mime_type )
 		n$file_mime_type = f$mime_type;
@@ -203,7 +207,7 @@ function report(c: connection, chain: vector of Files::Info, position: count, si
 	a$note = accepted;
 	a$msg = fmt("SSL/TLS connection established with %s certificate chain containing %s at position %d%s",
 	            to_lower(side), desc, position, suffix);
-	a$identifier = chain_identifier(c, side, T, hash);
+	a$identifier = notice_identifier(c, side, T, hash);
 	NOTICE(a);
 	}
 
@@ -319,7 +323,7 @@ event x509_certificate(f: fa_file, cert_ref: opaque of x509, cert: X509::Certifi
 		for ( cid in f$conns )
 			{
 			n$conn = f$conns[cid];
-			n$identifier = cat_sep("|", "", cid$resp_h, cid$resp_p, hash);
+			n$identifier = notice_identifier(n$conn, f$is_orig ? "Client" : "Server", F, hash);
 			}
 
 	NOTICE(n);
