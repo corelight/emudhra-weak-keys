@@ -174,15 +174,21 @@ function describe_key_cert(ki: KeyInfo, cert: X509::Certificate, hash: string): 
 	           ki$name, ki$ccadb, cert$issuer);
 	}
 
-# Raises the notices for a match in an SSL/TLS certificate chain. The message
-# is "<side> certificate chain contains <desc> at position <position><suffix>".
-function report(c: connection, f: Files::Info, side: string, position: count, established: bool,
-                seen: Notice::Type, accepted: Notice::Type, desc: string, suffix: string,
-                hash: string, sub: string)
+# Raises the notices for the certificate at the given position of an SSL/TLS
+# certificate chain. The message is "<side> certificate chain contains <desc>
+# at position <position><suffix>".
+function report(c: connection, chain: vector of Files::Info, position: count, side: string,
+                established: bool, seen: Notice::Type, accepted: Notice::Type,
+                desc: string, suffix: string)
 	{
+	local f = chain[position];
+	local hash = cert_hash(f$x509$handle);
+	local leaf = chain[0]?$x509 ? chain[0]$x509$certificate$subject : "<unknown>";
+	local sni = c$ssl?$server_name ? fmt(", SNI %s", c$ssl$server_name) : "";
+
 	local n = Notice::Info($note=seen, $conn=c, $fuid=f$fuid,
 	                       $msg=fmt("%s certificate chain contains %s at position %d%s", side, desc, position, suffix),
-	                       $sub=sub,
+	                       $sub=fmt("leaf: %s%s; sha256: %s", leaf, sni, hash),
 	                       $identifier=chain_identifier(c, side, F, hash),
 	                       $suppress_for=suppression_interval);
 	if ( f?$mime_type )
@@ -201,18 +207,11 @@ function report(c: connection, f: Files::Info, side: string, position: count, es
 	NOTICE(a);
 	}
 
-# Checks a complete SSL/TLS certificate chain. Certificates issued by one of
-# the compromised intermediates are only reported if the chain does not contain
-# any of the compromised keys.
-function check_chain(c: connection, chain: vector of Files::Info, side: string, established: bool)
+# Reports certificates in the chain that contain one of the compromised keys.
+# Returns whether there were any.
+function check_chain_keys(c: connection, chain: vector of Files::Info, side: string, established: bool): bool
 	{
-	if ( |chain| == 0 )
-		return;
-
-	local leaf = chain[0]?$x509 ? chain[0]$x509$certificate$subject : "<unknown>";
-	local sni = c$ssl?$server_name ? fmt(", SNI %s", c$ssl$server_name) : "";
-	local key_found = F;
-	local issued: vector of count = vector();
+	local found = F;
 
 	for ( i in chain )
 		{
@@ -221,41 +220,50 @@ function check_chain(c: connection, chain: vector of Files::Info, side: string, 
 
 		local info = chain[i]$x509;
 		local spki = spki_hash(info$handle);
+		if ( spki !in compromised_keys )
+			next;
 
-		if ( spki in compromised_keys )
-			{
-			key_found = T;
-			local hash = cert_hash(info$handle);
-			report(c, chain[i], side, i, established,
-			       Compromised_Intermediate_Cert, Compromised_Intermediate_Cert_Accepted,
-			       describe_key_cert(compromised_keys[spki], info$certificate, hash), "", hash,
-			       fmt("leaf: %s%s; sha256: %s", leaf, sni, hash));
-			}
-
-		else if ( issuer_prefilter in info$certificate$issuer )
-			{
-			local issuer = normalize_name(info$certificate$issuer);
-			if ( issuer in compromised_subjects && compromised_subjects[issuer] in compromised_keys )
-				issued += i;
-			}
+		found = T;
+		report(c, chain, i, side, established,
+		       Compromised_Intermediate_Cert, Compromised_Intermediate_Cert_Accepted,
+		       describe_key_cert(compromised_keys[spki], info$certificate, cert_hash(info$handle)), "");
 		}
 
-	if ( key_found )
-		return;
+	return found;
+	}
 
-	for ( j in issued )
+# Reports certificates in the chain that were issued by one of the compromised
+# intermediates.
+function check_chain_issuers(c: connection, chain: vector of Files::Info, side: string, established: bool)
+	{
+	for ( i in chain )
 		{
-		local pos = issued[j];
-		local cert = chain[pos]$x509;
-		local iki = compromised_keys[compromised_subjects[normalize_name(cert$certificate$issuer)]];
-		local ihash = cert_hash(cert$handle);
-		report(c, chain[pos], side, pos, established,
+		if ( ! chain[i]?$x509 )
+			next;
+
+		local cert = chain[i]$x509$certificate;
+		if ( issuer_prefilter !in cert$issuer )
+			next;
+
+		local issuer = normalize_name(cert$issuer);
+		if ( issuer !in compromised_subjects || compromised_subjects[issuer] !in compromised_keys )
+			next;
+
+		local ki = compromised_keys[compromised_subjects[issuer]];
+		report(c, chain, i, side, established,
 		       Compromised_Intermediate_Issuer, Compromised_Intermediate_Issuer_Accepted,
-		       fmt("%s, issued by compromised eMudhra intermediate %s (CCADB %s)",
-		           cert$certificate$subject, iki$name, iki$ccadb),
-		       ", but not the intermediate itself",
-		       ihash, fmt("leaf: %s%s; sha256: %s", leaf, sni, ihash));
+		       fmt("%s, issued by compromised eMudhra intermediate %s (CCADB %s)", cert$subject, ki$name, ki$ccadb),
+		       ", but not the intermediate itself");
 		}
+	}
+
+# Checks a complete SSL/TLS certificate chain. Certificates issued by one of
+# the compromised intermediates are only reported if the chain does not contain
+# any of the compromised keys - otherwise, the intermediate is in the chain.
+function check_chain(c: connection, chain: vector of Files::Info, side: string, established: bool)
+	{
+	if ( ! check_chain_keys(c, chain, side, established) )
+		check_chain_issuers(c, chain, side, established);
 	}
 
 function check_chains(c: connection, established: bool)
