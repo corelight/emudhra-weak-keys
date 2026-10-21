@@ -1,215 +1,120 @@
 emudra-weak-keys
 ================
 
-> **Note:** This package (scripts and this README) was generated with the
-> help of an LLM (Claude). Please review it before relying on it.
+> **Note:** This package was created with the help of Claude Opus 5.5.
+> All code and text was reviewed & verified manually.
 
-This Zeek package raises a notice when it encounters one of the eMudhra
-intermediate CA certificates whose private keys are known to be
-compromised, for example as part of an SSL/TLS certificate chain.
+This is a Zeek package to detect connections that use eMudhra intermediate
+CA certificates with compromised/well-known private keys.
 
-Background
-----------
+For more information see, e.g., the [original Bugzilla entry](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449)
+or https://emudhra.we-have-a-problem.com/.
 
-Source: Mozilla Bugzilla 2083449 (distrust tracked in Bug 2083382).
+Please note that this detection only works for connections using TLS 1.2
+and below. In TLS 1.3, certificates are encrypted and Zeek does not know
+which certificates cross over the wire.
 
-On 17th October @ 20:06 UTC, Mozilla received a report to
-certificates@mozilla.org, forwarded by the Chrome Root program, from
-Wayne, that the private key of 8 eMudhra Intermediate certificates have
-been compromised. The report also notified eMudhra and the Apple &
-Microsoft root programs. The report included a proof of key control for
-all 8 certificates.
+Background & Impact
+-------------------
 
-Mozilla acknowledged the report @ 20:08 UTC, confirmed the proof of key
-control was valid and began the process to distrust the certificates in
-Firefox via OneCRL. This process was tracked in Bug 2083382 and
-completed @ 22:59 UTC.
+The eMudhra CA issued several intermediate CA certificates with very
+weak ECDSA private keys (e.g. a key that's the number 4).
 
-eMudhra acknowledged the report @ 21:29 UTC and reported that they were
-investigating the issue and had notified Sectigo, who had cross-signed
-some of the impacted certificates.
+Thus, this enables anyone to trivially create certificates that are signed
+by any of the impacted CA certificates. To today's knowledge, there are
+8 affected keys, 6 of which are in certificates that were trusted for
+the web PKI.
 
-Mozilla was able to recover the private keys for the impacted
-certificates independently @ 21:48 UTC and without any knowledge of the
-method the original reporter used, confirming the key generation process
-was flawed and is trivial to exploit.
+While major webbrowsers immediately distrusted the affected intermediate
+CA certificates, devices that are not as readily updateable will be
+at danger of accepting these malicious certificates for potentially
+significant periods of times.
 
-6 of the impacted certificates are for TLS and trusted by the Chrome,
-Mozilla, Microsoft and Apple root programs. The other two certificates
-are for codesigning and trusted by Microsoft.
+For detailed background and a timeline see this
+[Bugzilla entry](https://bugzilla.mozilla.org/show_bug.cgi?id=2083449).
 
-Since the private keys of these intermediates are compromised, anybody
-can use them to issue certificates for arbitrary names. A chain
-containing one of them should be treated as suspicious.
+Detection Logic
+---------------
 
-Detected keys
--------------
+This package matches on the Subjec Public Key Info (SPKI) of the affected
+intermediate CA certificates. The SPKI is the bit of the certificate
+that contains the compromised keys - so this will also detect any
+potentially unknown cross-signs, or any other certificates that
+might be created with the same keys.
 
-The package matches on the SHA-256 hash of the Subject Public Key Info
-(SPKI) of the certificate, i.e. on the compromised key rather than on a
-specific certificate. This detects the intermediates issued by the
-emSign roots, their cross-signatures by Sectigo (AAA Certificate
-Services), and any other certificate that contains one of these keys -
-including certificates that somebody created using the leaked keys.
+List of SPKIs:
 
-| Intermediate                      | CCADB   | SPKI SHA-256 |
-|-----------------------------------|---------|--------------|
-| EM EV TLS CA - G3B (eMudhra BV)   | A012304 | E0254C7FCDC265E2F0F8A428DABB75AB4AE039B4872D62F5EE57F0877D5A8A41 |
-| EM OV TLS CA - G3B (eMudhra BV)   | A012308 | 43BFFA19D6EF651451F6841E019931E96F6F2EAEFF28AB4B6F1CE4576DE2717B |
-| EM DV TLS CA - G3B (eMudhra BV)   | A012302 | EBED6475C2C2D80FCB199F3FE8DD6E6B3CE60B77EB15D4E42C3DEC0C6F5B5105 |
-| EM EV TLS CA - G3C (eMudhra Inc)  | A012296 | 5C0660A2B164910D8FF589C18E14552E9E0EC237DCEFE2CB736D41A4811F81A0 |
-| EM OV TLS CA - G3C (eMudhra Inc)  | A012300 | 63ECEFEE431D49523BC1136C4E72D0206A477086CAF606CD5CF025686C109CF8 |
-| EM DV TLS CA - G3C (eMudhra Inc)  | A012294 | 49DD353DC2B919A3770645117D0E60C16115E7D1BC259EEFE734B00EA434FE5F |
-| EM OV CS CA - G3B (eMudhra BV)    | A012306 | EC4FFA1AD0AC88081314B7AAFFEF6A91F97CD57291BB5BA686C5415F5EB4F6B6 |
-| EM OV CS CA - G3C (eMudhra Inc)   | A012298 | 92C063D67E8F14DB71D288E11266FFDAF69CBF115F7BAB14F3BC2F68D25E0E30 |
-
-The CCADB IDs refer to the intermediates issued by the emSign roots.
-
-The keys live in the `EMudhraWeakKeys::compromised_keys` option, indexed
-by the lowercase hex SPKI SHA-256 hash. The 16 known certificates for
-these keys (8 issued by the emSign roots, 8 cross-signed by Sectigo) are
-listed in `EMudhraWeakKeys::known_certs`, as the lowercase hex SHA-256
-hash of the DER-encoded certificate; this set is only used to describe
-the certificate in the notice. Both options can be extended via `redef`
-or the config framework.
-
-The certificate data was taken from `impacted-intermediates.json`
-published at https://emudhra.we-have-a-problem.com/. All hashes and
-serial numbers were cross-checked against the PEM certificates contained
-in that file.
+| Intermediate                      |  SPKI SHA-256 |
+|-----------------------------------|---------------|
+| EM EV TLS CA - G3B (eMudhra BV)   |  E0254C7FCDC265E2F0F8A428DABB75AB4AE039B4872D62F5EE57F0877D5A8A41 |
+| EM OV TLS CA - G3B (eMudhra BV)   |  43BFFA19D6EF651451F6841E019931E96F6F2EAEFF28AB4B6F1CE4576DE2717B |
+| EM DV TLS CA - G3B (eMudhra BV)   |  EBED6475C2C2D80FCB199F3FE8DD6E6B3CE60B77EB15D4E42C3DEC0C6F5B5105 |
+| EM EV TLS CA - G3C (eMudhra Inc)  |  5C0660A2B164910D8FF589C18E14552E9E0EC237DCEFE2CB736D41A4811F81A0 |
+| EM OV TLS CA - G3C (eMudhra Inc)  |  63ECEFEE431D49523BC1136C4E72D0206A477086CAF606CD5CF025686C109CF8 |
+| EM DV TLS CA - G3C (eMudhra Inc)  |  49DD353DC2B919A3770645117D0E60C16115E7D1BC259EEFE734B00EA434FE5F |
+| EM OV CS CA - G3B (eMudhra BV)    |  EC4FFA1AD0AC88081314B7AAFFEF6A91F97CD57291BB5BA686C5415F5EB4F6B6 |
+| EM OV CS CA - G3C (eMudhra Inc)   |  92C063D67E8F14DB71D288E11266FFDAF69CBF115F7BAB14F3BC2F68D25E0E30 |
 
 Usage
 -----
 
-    zkg install emudra-weak-keys
+    zkg install corelight/emudhra-weak-keys
 
 or load the scripts directly:
 
-    zeek -r trace.pcap /path/to/emudra-weak-keys/scripts
+    zeek -r trace.pcap /path/to/emudhra-weak-keys/scripts
 
-The package checks every certificate that Zeek's X509 analyzer parses
-(the `x509_certificate` event). Since the SPKI hash is computed from the
-parsed certificate, data appended after the certificate does not
-influence it.
+The package checks every certificate that's parsed by Zeek against
+the list.
 
-When a match is found, a notice of type
-`EMudhraWeakKeys::Compromised_Intermediate_Cert` is raised, with `fuid`
-referring to the matching certificate. The message names the
-compromised intermediate and the issuer of the encountered certificate.
-If the certificate is not one of the known certificates, the message
-says so - this might indicate a certificate created using the leaked key.
-For certificates seen in SSL/TLS (server and client chains), the message
-also contains the position in the chain, and the `sub` field contains
-the leaf certificate subject, the SNI (if present) and the SHA-256 hash
-of the certificate.
 
-Notices are suppressed for `EMudhraWeakKeys::suppression_interval`
-(default: one day) per server address and port, side presenting the
-certificate (server or client), and compromised key. They are not
-suppressed per certificate, since anyone can create arbitrarily many
-certificates containing one of the leaked public keys; this way, such
-certificates cannot be used to flood notices. For the same reason,
-notices about client certificates are suppressed per server rather than
-per client address, as clients are under the control of potential
-attackers. The established notices (see below) are suppressed per
-client address, server address and compromised key, so that every
-client that accepts a chain is reported.
+Notices
+-------
 
-SSL/TLS certificate chains are checked once they are complete: when the
-connection is established, or - if it is not - when it ends. Detection
-therefore does not depend on the TLS handshake completing; clients that
-already distrust these intermediates will typically abort the
-connection. For such connections, the notice is only raised at the end
-of the connection. Certificates seen in other protocols are checked as
-soon as they are parsed.
+All notice types are under ``EMudhraWeakKeys::``
 
-For server certificate chains, if the SSL/TLS connection is
-established, a second notice of type
-`EMudhraWeakKeys::Compromised_Intermediate_Cert_Established` is raised,
-with the same details. Zeek considers a connection established once both
-sides have switched to encrypted communication - in TLS 1.2, a client
-only does this after accepting the server certificate chain. This
-notice therefore indicates that the client accepted the chain - or did
-not validate it at all, which is common for e.g. `curl -k`, malware or
-IoT devices. It does not indicate that application data was exchanged.
+| Notice | Observation |
+|---|---|
+| `Compromised_Intermediate_Cert` | Affected intermediate cert seen in connection |
+| `Compromised_Intermediate_Cert_Established` | Affected cert seen, handshake finished |
+| `Compromised_Intermediate_Issuer` | Certificate with an affected issuer seen in  connection |
+| `Compromised_Intermediate_Issuer_Established` | Affected issuer seen, handshake finished |
 
-Client certificates
--------------------
+Results go into `notice.log`; no additional log is created.
 
-Client certificate chains are checked in the same way as server
-certificate chains. The six TLS intermediates assert both TLS server
-and TLS client authentication in their extended key usage, so client
-certificates issued by them - or created using the leaked keys - are
-valid for TLS client authentication. Which client certificates a server
-accepts depends on the trust store it uses for client authentication.
+By default, the `_Cert` notices are issued once per server IP address per day,
+and the `_Established` notices are issued once per client IP address per day.
 
-In practice, client certificates issued by public CAs are rare, and
-they are being phased out: the Chrome Root Program requires subscriber
-certificates issued from March 15, 2027 on to only assert TLS server
-authentication.
+Please note that the ``Compromised_Intermediate_Cert` notices flag that
+a compromised certificate was present in the connection, whereas the
+``Compromised_Intermediate_Issuer`` notices only match on the issuer string
+of the certificates; this is a weaker signal.
 
-No established notices are raised for client certificate chains:
-clients control whether they send a certificate chain - a malicious
-client can send one of the (public) compromised intermediates, or
-certificates created with the leaked keys, to trigger notices - and
-servers that request client certificates optionally may complete the
-handshake without validating them. An established connection therefore
-says little about whether the chain was accepted.
+Furthermore, the `Established` notices only track if the handshake finished; this does
+not necessarily mean that any data was exchanged. Some clients might finish the handshake
+even if certificate verification fails, and only abort afterwards.
 
-Chains without the compromised intermediate
--------------------------------------------
+The script checks both client and server certificate chains. It is unlikely
+that you will see these certificates in client certificates (if you do - please reach
+out to us and let us know).
 
-A server (or client) can omit the compromised intermediate from the
-chain it sends, relying on the peer to complete the chain - e.g. via
-AIA fetching or intermediate caches. Someone using a leaked key to
-create rogue certificates might do this to avoid detection by key.
+Certificates are also checked in non-TLS protocols that Zeek supports (RDP, Kerberos).
+Certificates transferred as files (e.g. downloaded via HTTP) are not checked.
 
-Therefore, SSL/TLS certificate chains that do not contain any of the
-compromised keys are also checked for certificates whose issuer name
-matches one of the compromised intermediates. All certificates in the
-chain are checked, not only the leaf, since apart from the leaf coming
-first, the order of the certificates is not guaranteed. This would also
-detect a rogue sub-CA created with a leaked key - however, the
-compromised intermediates have a path length constraint of 0, so
-compliant clients reject such sub-CAs. Clients have to match the issuer
-name to build the chain, so it cannot be changed by a rogue certificate
-that should validate. Names are compared case-insensitively and ignoring
-insignificant whitespace.
+Configuration Options
+---------------------
 
-If a match is found, a notice of type
-`EMudhraWeakKeys::Compromised_Intermediate_Issuer` is raised; for
-server chains, if the connection is established, an additional
-`EMudhraWeakKeys::Compromised_Intermediate_Issuer_Established` notice is
-raised. The `sub` field contains the leaf certificate subject, the SNI
-(if present) and the SHA-256 hash of the matching certificate.
+The notice suppression interval can be changed via ``EMudhraWeakKeys::suppression_interval``.
 
-These checks happen once the chain is complete: when the connection is
-established, or when it ends otherwise. For aborted connections the
-notice is therefore only raised at the end of the connection.
-
-The subject names live in the `EMudhraWeakKeys::compromised_subjects`
-option, normalized using `EMudhraWeakKeys::normalize_name` (lowercased,
-with all whitespace removed). To keep this cheap, only issuer names
-matching the `EMudhraWeakKeys::issuer_prefilter` pattern (by default
-`/emudhra/i`) are normalized and looked up; when adding subjects that do
-not contain "emudhra", adjust the pattern as well.
+There are lots of other options that can be used to, e.g. change the list of compromised keys.
+Please see the script file for more details.
 
 Limitations
 -----------
 
-- Only certificates that Zeek passes to the X509 analyzer are checked:
-  SSL/TLS and DTLS chains, as well as certificates in RDP and Kerberos
-  (PKINIT). Certificates transferred as files (e.g. downloaded over
-  HTTP) or embedded in OCSP responses are not checked.
 - In TLS 1.3 the certificate chain is encrypted and cannot be seen by
   Zeek, so detection only works for TLS 1.2 and earlier (unless
   decryption is used).
-- Certificates issued by one of the compromised intermediates are only
-  detected if they are sent in an SSL/TLS chain (which the leaf always
-  is); the issuer name check does not apply to certificates seen in
-  other protocols. Name normalization covers case and whitespace, not
-  full RFC 4518 string preparation.
-- If another CA uses the same subject name as one of the compromised
-  intermediates, certificates issued by it trigger the issuer name
-  notice.
-- The two code-signing CAs will usually not appear in TLS traffic.
+- The issuer name check does not apply to certificates seen in non-TLS
+  protocols. Some name normalization is performed for the issuer check,
+  but this does not cover all possible cases.

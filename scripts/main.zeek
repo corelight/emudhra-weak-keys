@@ -1,25 +1,9 @@
 ##! Raise a notice when a certificate is encountered that contains the public
-##! key of one of the eMudhra intermediate CAs whose private keys were found to
-##! be compromised due to flawed key generation (Mozilla Bugzilla 2083449).
+##! key of one of the eMudhra intermediate CAs whose private keys are compromised.
 ##!
 ##! Certificates are matched by the SHA-256 hash of their Subject Public Key
-##! Info (SPKI). This detects all certificates for the compromised keys - the
-##! intermediates issued by the emSign roots, their cross-signatures by Sectigo,
-##! as well as any other certificate created for these keys. Every certificate
-##! parsed by the X509 analyzer is checked. Certificates seen in SSL/TLS (both
-##! server and client chains) are checked once the chain is complete - when the
-##! connection is established, or when it ends otherwise. The notice contains
-##! information about the chain. For server chains, a second notice is raised
-##! if the SSL/TLS connection is established - i.e. the client did not reject
-##! the chain.
-##!
-##! Additionally, SSL/TLS certificate chains that do not contain any of the
-##! compromised keys are checked for certificates whose issuer is one of the
-##! compromised intermediates. This detects chains from which the server (or
-##! client) omitted the compromised intermediate, e.g. relying on the peer to
-##! complete the chain via AIA fetching or intermediate caching. Since the
-##! issuer name has to match for clients to build the chain, this also works for
-##! rogue certificates created with the leaked keys.
+##! Info (SPKI). Notices are output when affected certificates are seen,
+##! and when connections are established.
 
 @load base/protocols/ssl
 @load base/files/x509
@@ -32,22 +16,21 @@ export {
 		## Indicates that a certificate containing the public key of one of
 		## the compromised eMudhra intermediate CAs was encountered.
 		Compromised_Intermediate_Cert,
-		## Indicates that an SSL/TLS connection was established although the
+		## Indicates that an SSL/TLS handshake finished although the
 		## server certificate chain contained a certificate with the public key
-		## of one of the compromised eMudhra intermediate CAs. This means that
-		## the client accepted the chain, or did not validate it. This is not
-		## raised for client certificate chains, since clients control whether
-		## they send them, and servers may not validate them.
+		## of one of the compromised eMudhra intermediate CAs. This does not
+		## necessarily mean that the client accepted the certificate and that
+		## data was exchanged.
 		Compromised_Intermediate_Cert_Established,
 		## Indicates that an SSL/TLS certificate chain contained a certificate
 		## issued by one of the compromised eMudhra intermediate CAs (based on
 		## the issuer name), while the chain did not contain a certificate with
 		## the public key of any of the compromised intermediates.
 		Compromised_Intermediate_Issuer,
-		## Indicates that an SSL/TLS connection was established with a server
-		## certificate chain for which
+		## Indicates that an SSL/TLS connection handshake finished where
 		## :zeek:see:`EMudhraWeakKeys::Compromised_Intermediate_Issuer` was
-		## raised.
+		## raised. This does not necessarily mean that the client accepted the
+		## certificate and that data was exchanged.
 		Compromised_Intermediate_Issuer_Established,
 	};
 
@@ -55,25 +38,22 @@ export {
 	type KeyInfo: record {
 		## Subject common name and organization of the intermediate CA.
 		name: string;
-		## CCADB record ID of the intermediate issued by the emSign root.
-		ccadb: string;
 	};
 
-	## Compromised keys, indexed by the lowercase hex SHA-256 hash of their
-	## DER-encoded Subject Public Key Info.
+	## Compromised keys, indexed by SPKI
 	option compromised_keys: table[string] of KeyInfo = {
-		["ebed6475c2c2d80fcb199f3fe8dd6e6b3ce60b77eb15d4e42c3dec0c6f5b5105"] = KeyInfo($name="EM DV TLS CA - G3B (eMudhra BV)", $ccadb="A012302"),
-		["43bffa19d6ef651451f6841e019931e96f6f2eaeff28ab4b6f1ce4576de2717b"] = KeyInfo($name="EM OV TLS CA - G3B (eMudhra BV)", $ccadb="A012308"),
-		["e0254c7fcdc265e2f0f8a428dabb75ab4ae039b4872d62f5ee57f0877d5a8a41"] = KeyInfo($name="EM EV TLS CA - G3B (eMudhra BV)", $ccadb="A012304"),
-		["49dd353dc2b919a3770645117d0e60c16115e7d1bc259eefe734b00ea434fe5f"] = KeyInfo($name="EM DV TLS CA - G3C (eMudhra Inc)", $ccadb="A012294"),
-		["63ecefee431d49523bc1136c4e72d0206a477086caf606cd5cf025686c109cf8"] = KeyInfo($name="EM OV TLS CA - G3C (eMudhra Inc)", $ccadb="A012300"),
-		["5c0660a2b164910d8ff589c18e14552e9e0ec237dcefe2cb736d41a4811f81a0"] = KeyInfo($name="EM EV TLS CA - G3C (eMudhra Inc)", $ccadb="A012296"),
-		["ec4ffa1ad0ac88081314b7aaffef6a91f97cd57291bb5ba686c5415f5eb4f6b6"] = KeyInfo($name="EM OV CS CA - G3B (eMudhra BV)", $ccadb="A012306"),
-		["92c063d67e8f14db71d288e11266ffdaf69cbf115f7bab14f3bc2f68d25e0e30"] = KeyInfo($name="EM OV CS CA - G3C (eMudhra Inc)", $ccadb="A012298"),
+		["ebed6475c2c2d80fcb199f3fe8dd6e6b3ce60b77eb15d4e42c3dec0c6f5b5105"] = KeyInfo($name="EM DV TLS CA - G3B (eMudhra BV)"),
+		["43bffa19d6ef651451f6841e019931e96f6f2eaeff28ab4b6f1ce4576de2717b"] = KeyInfo($name="EM OV TLS CA - G3B (eMudhra BV)"),
+		["e0254c7fcdc265e2f0f8a428dabb75ab4ae039b4872d62f5ee57f0877d5a8a41"] = KeyInfo($name="EM EV TLS CA - G3B (eMudhra BV)"),
+		["49dd353dc2b919a3770645117d0e60c16115e7d1bc259eefe734b00ea434fe5f"] = KeyInfo($name="EM DV TLS CA - G3C (eMudhra Inc)"),
+		["63ecefee431d49523bc1136c4e72d0206a477086caf606cd5cf025686c109cf8"] = KeyInfo($name="EM OV TLS CA - G3C (eMudhra Inc)"),
+		["5c0660a2b164910d8ff589c18e14552e9e0ec237dcefe2cb736d41a4811f81a0"] = KeyInfo($name="EM EV TLS CA - G3C (eMudhra Inc)"),
+		["ec4ffa1ad0ac88081314b7aaffef6a91f97cd57291bb5ba686c5415f5eb4f6b6"] = KeyInfo($name="EM OV CS CA - G3B (eMudhra BV)"),
+		["92c063d67e8f14db71d288e11266ffdaf69cbf115f7bab14f3bc2f68d25e0e30"] = KeyInfo($name="EM OV CS CA - G3C (eMudhra Inc)"),
 	};
 
 	## Subject names of the compromised intermediate CAs, mapped to the
-	## SPKI hash of their key in :zeek:see:`EMudhraWeakKeys::compromised_keys`.
+	## SPKI in :zeek:see:`EMudhraWeakKeys::compromised_keys`.
 	## Names are normalized using :zeek:see:`EMudhraWeakKeys::normalize_name`.
 	option compromised_subjects: table[string] of string = {
 		["cn=emdvtlsca-g3b,o=emudhrabv,c=nl"] = "ebed6475c2c2d80fcb199f3fe8dd6e6b3ce60b77eb15d4e42c3dec0c6f5b5105",
@@ -90,50 +70,21 @@ export {
 	## lowercases it and removes all whitespace (including escaped spaces;
 	## other escapes are kept). Clients
 	## compare names case-insensitively and ignoring insignificant
-	## whitespace, so a rogue certificate could vary them. This normalizes
-	## more than clients do, which is fine for detection.
+	## whitespace.
 	global normalize_name: function(name: string): string;
 
 	## Issuer names have to match this pattern to be checked against
 	## :zeek:see:`EMudhraWeakKeys::compromised_subjects`. This avoids
-	## normalizing the issuer name of every certificate. If you add subjects
-	## that do not match, adjust this pattern.
+	## normalizing the issuer name of every certificate.
 	option issuer_prefilter = /emudhra/i;
 
 	## How long notices are suppressed. Notices are suppressed per server
 	## (address and port), side of the connection presenting the certificate,
-	## and compromised key - not per certificate, as anyone can create
-	## arbitrarily many certificates containing one of the leaked public keys.
-	## For client certificates, this means one notice per server, as clients
-	## (and their addresses) are under the control of potential attackers. The
-	## established notices are suppressed per client address, server address
+	## and compromised key.
+	## The established notices are suppressed per client address, server address
 	## and compromised key, so that every client accepting a chain is
 	## reported.
 	option suppression_interval = 1day;
-
-	## Known certificates for the compromised keys (the intermediates issued
-	## by the emSign roots and their cross-signatures by Sectigo), as the
-	## lowercase hex SHA-256 hash of their DER encoding. This is only used to
-	## describe the encountered certificate; detection is based on
-	## :zeek:see:`EMudhraWeakKeys::compromised_keys`.
-	option known_certs: set[string] = {
-		"42c4accd12c4f59597925e1a08a7a90102608543809308d50ec427e118ba1493",	# issued by emSign Root TLS CA - G3
-		"45a883f349aedfd5f3a649b5498ffb121712ba8b448f3f2a91dbc5a766fcddbe",	# issued by AAA Certificate Services
-		"98b896625c0c230adeec3eb2cf6aad5001ecf9156a68644e82374ce5833bc25b",	# issued by emSign Root TLS CA - G3
-		"5f1ded4dd590af74631290cf073b122a2aac6a1fa479778a0bd43579bd832699",	# issued by AAA Certificate Services
-		"e7568fe6e12331f4fd7de61da4c7559d0f8eb192a218d4741a3ba75184333838",	# issued by emSign Root TLS CA - G3
-		"579480aea166290bd3c643589e795fc0d0e54e86505d180f1dff99efd3199512",	# issued by AAA Certificate Services
-		"0164d7ceae5bb909c272af151ff44b1177ae9b47d9424b94f1d9558c30934d19",	# issued by emSign Root TLS CA - G3
-		"62b7f9868263f72f6911fc78ceaf72c1979158b7368bf648683bb2aa39b02e72",	# issued by AAA Certificate Services
-		"cb6e15165ac802e9b3f993f16c25d41f4e81c21ebde71ae1b012ac00bf9c7c3f",	# issued by emSign Root TLS CA - G3
-		"7485b51c0ed192878fa1d2f948fb529ae1842cc5086c4b67f7be5b2039de9489",	# issued by AAA Certificate Services
-		"432ec25f0d28de9006d97bf752f17bbb2cd41f669933fcb072d9a1148d0261f3",	# issued by emSign Root TLS CA - G3
-		"fd9d5c2dbbd4995ab69b8d50c439d9527b00529199c2fd01b2174eb58f07021f",	# issued by AAA Certificate Services
-		"9e39de2881273acc225a149c72ba3e0f51424963669ab633ee1dc7df5db067b4",	# issued by emSign Root CS CA - G3
-		"a496e23ac0cab8155fc9b117b97eae368efcbb9041aec8804d5a308d2d01c2d8",	# issued by AAA Certificate Services
-		"4b2460a466f95fd40113bcdcca2ceb29b3b093921de45474da7df48874c630b1",	# issued by emSign Root CS CA - G3
-		"84112972b8e59d14560ae7e7119654474aad119990cf3722bfc1e3b91615e1fd",	# issued by AAA Certificate Services
-	};
 }
 
 redef record SSL::Info += {
@@ -178,9 +129,8 @@ function spki_hash(cert_ref: opaque of x509): string
 # Describes a certificate containing the compromised key ki.
 function describe_key_cert(ki: KeyInfo, cert: X509::Certificate, hash: string): string
 	{
-	return fmt("%s eMudhra intermediate %s (CCADB %s), issued by %s",
-	           hash in known_certs ? "compromised" : "unknown certificate with the key of compromised",
-	           ki$name, ki$ccadb, cert$issuer);
+	return fmt("intermediate %s, issued by %s",
+	           ki$name, cert$issuer);
 	}
 
 # Raises the notices for the certificate at the given position of an SSL/TLS
@@ -219,8 +169,6 @@ function report(c: connection, chain: vector of Files::Info, position: count, si
 	NOTICE(a);
 	}
 
-# Reports certificates in the chain that contain one of the compromised keys.
-# Returns whether there were any.
 function check_chain_keys(c: connection, chain: vector of Files::Info, side: string, established: bool): bool
 	{
 	local found = F;
@@ -244,8 +192,6 @@ function check_chain_keys(c: connection, chain: vector of Files::Info, side: str
 	return found;
 	}
 
-# Reports certificates in the chain that were issued by one of the compromised
-# intermediates.
 function check_chain_issuers(c: connection, chain: vector of Files::Info, side: string, established: bool)
 	{
 	for ( i in chain )
@@ -265,7 +211,7 @@ function check_chain_issuers(c: connection, chain: vector of Files::Info, side: 
 		local ki = compromised_keys[spki];
 		report(c, chain, i, side, established,
 		       Compromised_Intermediate_Issuer, Compromised_Intermediate_Issuer_Established, spki,
-		       fmt("%s, issued by compromised eMudhra intermediate %s (CCADB %s)", cert$subject, ki$name, ki$ccadb),
+		       fmt("%s, issued by compromised eMudhra intermediate %s", cert$subject, ki$name),
 		       ", but not the intermediate itself");
 		}
 	}
@@ -293,17 +239,15 @@ function check_chains(c: connection, established: bool)
 		check_chain(c, c$ssl$client_cert_chain, "Client", established);
 	}
 
-# Certificate chains are complete once the connection is established. The
-# priority is higher than the one of the SSL handler that calls
-# SSL::ssl_finishing, so that established connections are checked here.
+# Certificate chains are complete once the connection is established. Priority
+# 25 to be able to run this before the SSL::ssl_finishing hook that's called
+# by Zeek in ssl_establisjed.
 event ssl_established(c: connection) &priority=25
 	{
 	check_chains(c, T);
 	}
 
-# For connections that are not established, this is called when the connection
-# ends (or the SSL analyzer is removed due to a protocol violation; in that
-# case, the chain may be incomplete).
+# For connections that are not established.
 hook SSL::ssl_finishing(c: connection)
 	{
 	check_chains(c, F);
