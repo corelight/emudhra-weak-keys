@@ -244,6 +244,9 @@ function check_chains(c: connection, established: bool)
 # by Zeek in ssl_establisjed.
 event ssl_established(c: connection) &priority=25
 	{
+	if ( ! c?$ssl )
+		return;
+
 	check_chains(c, T);
 	}
 
