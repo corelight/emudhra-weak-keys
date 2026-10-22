@@ -7,7 +7,7 @@ description = Raises a notice when encountering one of
 	compromised due to flawed key generation (Mozilla Bugzilla 2083449),
 	e.g. as part of an SSL/TLS certificate chain.
 tags = ssl, tls, x509, certificate, emudhra, notice
-depends = 
+depends =
 	zeek >=8.0.0
 
 [template]
@@ -17,4 +17,3 @@ zkg_version = 3.2.0
 
 [template_vars]
 name = emudra-weak-keys
-

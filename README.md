@@ -33,7 +33,7 @@ For detailed background and a timeline see this
 Detection Logic
 ---------------
 
-This package matches on the Subjec Public Key Info (SPKI) of the affected
+This package matches on the Subject Public Key Info (SPKI) of the affected
 intermediate CA certificates. The SPKI is the bit of the certificate
 that contains the compromised keys - so this will also detect any
 potentially unknown cross-signs, or any other certificates that
@@ -82,7 +82,7 @@ Results go into `notice.log`; no additional log is created.
 By default, the `_Cert` notices are issued once per server IP address per day,
 and the `_Established` notices are issued once per client IP address per day.
 
-Please note that the ``Compromised_Intermediate_Cert` notices flag that
+Please note that the ``Compromised_Intermediate_Cert`` notices flag that
 a compromised certificate was present in the connection, whereas the
 ``Compromised_Intermediate_Issuer`` notices only match on the issuer string
 of the certificates; this is a weaker signal.

@@ -19,8 +19,8 @@ port=$BASE_PORT
 for name in "${INTERMEDIATES[@]}"; do
     for chain in "${CHAINS[@]}"; do
         printf "port %5d  %-20s  chain=%-7s  " "$port" "$name" "$chain"
-        status=$(curl -sk -o /dev/null -w "%{http_code}" "https://${HOST}:${port}/" 2>&1) && \
-            echo "HTTP ${status}" || \
+        status=$(curl -sk -o /dev/null -w "%{http_code}" "https://${HOST}:${port}/" 2>&1) &&
+            echo "HTTP ${status}" ||
             echo "FAILED"
         port=$((port + 1))
     done

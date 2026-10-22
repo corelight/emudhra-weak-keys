@@ -39,9 +39,9 @@ for name in "${INTERMEDIATES[@]}"; do
     dir="${SCRIPT_DIR}/${name}"
     for chain in "${CHAINS[@]}"; do
         chain_file="${CHAIN_DIR}/${name}-${chain}.pem"
-        cat "${dir}/intermediate-${chain}.crt.pem" > "$chain_file"
+        cat "${dir}/intermediate-${chain}.crt.pem" >"$chain_file"
         if [ "$chain" = "emsign" ]; then
-            cat "$CROSS_CERT" >> "$chain_file"
+            cat "$CROSS_CERT" >>"$chain_file"
         fi
 
         openssl s_server \
