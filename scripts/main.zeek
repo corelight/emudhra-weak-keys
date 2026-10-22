@@ -140,13 +140,16 @@ function report(c: connection, chain: vector of Files::Info, position: count, si
 	local leaf = chain[0]?$x509 ? chain[0]$x509$certificate$subject : "<unknown>";
 	local sni = c$ssl?$server_name ? fmt(", SNI %s", c$ssl$server_name) : "";
 
+	local notice_sub = fmt("leaf: %s%s; sha256: %s", leaf, sni, hash);
+	local mime = f?$mime_type ? f$mime_type : "";
+
 	local n = Notice::Info($note=seen_note, $conn=c, $fuid=f$fuid,
 	                       $msg=fmt("%s certificate chain contains %s at position %d%s", side, desc, position, suffix),
-	                       $sub=fmt("leaf: %s%s; sha256: %s", leaf, sni, hash),
+	                       $sub=notice_sub,
 	                       $identifier=notice_identifier(c, side, F, spki),
 	                       $suppress_for=suppression_interval);
-	if ( f?$mime_type )
-		n$file_mime_type = f$mime_type;
+	if ( mime != "" )
+		n$file_mime_type = mime;
 
 	NOTICE(n);
 
@@ -155,12 +158,16 @@ function report(c: connection, chain: vector of Files::Info, position: count, si
 	if ( ! established || side != "Server" )
 		return;
 
-	local a = copy(n);
-	a$note = established_note;
-	a$msg = fmt("SSL/TLS connection established with %s certificate chain containing %s at position %d%s",
-	            to_lower(side), desc, position, suffix);
-	a$identifier = notice_identifier(c, side, T, spki);
-	NOTICE(a);
+	local e = Notice::Info($note=established_note, $conn=c, $fuid=f$fuid,
+	                       $msg=fmt("SSL/TLS connection established with %s certificate chain containing %s at position %d%s",
+	                                to_lower(side), desc, position, suffix),
+	                       $sub=notice_sub,
+	                       $identifier=notice_identifier(c, side, T, spki),
+	                       $suppress_for=suppression_interval);
+	if ( mime != "" )
+		e$file_mime_type = mime;
+
+	NOTICE(e);
 	}
 
 function check_chain_keys(c: connection, chain: vector of Files::Info, side: string, established: bool): bool
